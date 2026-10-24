@@ -1,0 +1,32 @@
+name: Rebuild blog on Cloudflare Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'posts/**'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: pages-content-notification
+  cancel-in-progress: false
+
+jobs:
+  notify-pages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Request a Cloudflare Pages build
+        env:
+          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$DEPLOY_HOOK" ]; then
+            echo 'Set the CLOUDFLARE_PAGES_DEPLOY_HOOK repository secret.'
+            exit 1
+          fi
+          curl --fail-with-body --silent --show-error \
+            --connect-timeout 15 --max-time 60 \
+            --request POST "$DEPLOY_HOOK" > /dev/null
+          echo 'Build requested. Check Cloudflare Pages for build and deployment status.'

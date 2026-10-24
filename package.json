@@ -1,0 +1,53 @@
+{
+  "name": "soohyuk-blog",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "dev": "node scripts/prepare.mjs && react-router dev --host 0.0.0.0",
+    "build": "node scripts/prepare.mjs && react-router build && node scripts/finalize.mjs",
+    "licenses": "node scripts/licenses.mjs",
+    "typecheck": "node scripts/prepare.mjs && react-router typegen && tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "preview": "wrangler pages dev build/client --ip 0.0.0.0 --port 4173 --compatibility-date=2026-10-16",
+    "sync:content": "node scripts/prepare.mjs",
+    "verify:build": "node scripts/verify-build.mjs",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@fontsource-variable/ibm-plex-sans": "^5.3.0",
+    "@fontsource-variable/noto-sans-kr": "^5.3.1",
+    "dotenv": "^18.0.8",
+    "isbot": "^5",
+    "mermaid": "11.15.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router": "^8.4.0",
+    "rehype-katex": "^7.0.1",
+    "rehype-sanitize": "^6.0.0",
+    "rehype-slug": "^6.0.0",
+    "rehype-stringify": "^10.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
+    "shiki": "^4.5.0",
+    "unified": "^11.0.5",
+    "unist-util-visit": "^5.1.0",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
+    "@playwright/test": "^1.64.1",
+    "@react-router/dev": "^8.4.0",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "sharp": "^0.35.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "wrangler": "^4.151.1"
+  }
+}

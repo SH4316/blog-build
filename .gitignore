@@ -1,0 +1,10 @@
+node_modules/
+build/
+.react-router/
+.cache/
+.wrangler/
+.env
+.env.*
+!.env.example
+app/generated/
+test-results/

@@ -1,0 +1,177 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, writeFile, readFile, rename, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { buildCatalog, parsePost, projectDir, repositoryUrl, resolveSource, writeContent } from '../scripts/content.mjs';
+
+const article = (slug = 'example', body = '공개 본문입니다.', extra = '') => `---\ntitle: "예제 제목"\nslug: "${slug}"\ndate: "2026-10-16"\n${extra}\n---\n${body}\n`;
+async function fixture(t, files) {
+  const root = await mkdtemp(path.join(tmpdir(), 'soohyuk-content-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, 'posts'), { recursive: true });
+  for (const [name, content] of Object.entries(files)) {
+    const target = path.join(root, 'posts', name);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, content);
+  }
+  return root;
+}
+
+test('samples render code, math, nested folders, links, images, and Unicode while excluding drafts', async () => {
+  const result = await buildCatalog(path.join(projectDir, 'tests/fixtures/content-repo'), { sample: true });
+  assert.equal(result.catalog.posts.length, 5);
+  assert.ok(result.catalog.folders.includes('react/typescript'));
+  assert.ok(!result.catalog.folders.includes('drafts'));
+  assert.ok(!result.catalog.tags.includes('draft-only-tag'));
+  assert.ok(!JSON.stringify(result).includes('next-post-draft'));
+  assert.match(result.articles['gradient-descent'].html, /class="katex"/);
+  assert.match(result.articles['gradient-descent'].html, /<math /);
+  assert.match(result.articles['gradient-descent'].html, /katex-display/);
+  assert.match(result.articles['http-cache'].html, /class="shiki/);
+  assert.match(result.articles['http-cache'].html, /href="\/posts\/typescript-discriminated-unions"/);
+  assert.match(result.articles['git-worktree'].html, /href="\/posts\/%EA%B8%B0/);
+  assert.match(result.articles['http-cache'].html, /src="\/content-assets\/web\/images\/cache-flow.svg"/);
+  assert.match(result.articles['http-cache'].html, /loading="lazy"/);
+  assert.deepEqual(result.usedAssets, ['web/images/cache-flow.svg']);
+  assert.ok(result.articles['http-cache'].toc.some(item => item.level === 3));
+  assert.equal(result.catalog.sample, true);
+});
+
+test('frontmatter validates required fields, slug, calendar dates, tags, and booleans', () => {
+  assert.throws(() => parsePost('본문', 'bad.md'), /frontmatter/);
+  assert.throws(() => parsePost(article().replace('slug: "example"', 'slug: ""'), 'bad.md'), /slug is required/);
+  assert.throws(() => parsePost(article('bad/path'), 'bad.md'), /slug must/);
+  assert.throws(() => parsePost(article('Uppercase'), 'bad.md'), /slug must/);
+  assert.throws(() => parsePost(article().replace('2026-10-16', '2026-02-30'), 'bad.md'), /valid quoted/);
+  assert.throws(() => parsePost(article('example', '본문', 'tags: hello'), 'bad.md'), /tags must/);
+  assert.throws(() => parsePost(article('example', '본문', 'draft: "false"'), 'bad.md'), /draft must/);
+  assert.equal(parsePost(article('한글-주소'), '분류/예제.md').slug, '한글-주소');
+});
+
+test('moving a file changes the folder while preserving the article slug', async t => {
+  const root = await fixture(t, { 'before/example.md': article() });
+  const before = await buildCatalog(root);
+  await mkdir(path.join(root, 'posts/after/nested'), { recursive: true });
+  await rename(path.join(root, 'posts/before/example.md'), path.join(root, 'posts/after/nested/moved.md'));
+  const after = await buildCatalog(root);
+  assert.equal(before.catalog.posts[0].slug, after.catalog.posts[0].slug);
+  assert.equal(after.catalog.posts[0].folder, 'after/nested');
+  assert.deepEqual(after.catalog.folders, ['after', 'after/nested']);
+});
+
+test('duplicate slugs across folders fail the build', async t => {
+  const root = await fixture(t, { 'one/a.md': article(), 'two/b.md': article() });
+  await assert.rejects(buildCatalog(root), /Duplicate slug: example/);
+});
+
+test('additions, edits, and deletions are reflected without stale records', async t => {
+  const root = await fixture(t, { 'example.md': article() });
+  const first = await buildCatalog(root);
+  assert.equal(first.catalog.posts.length, 1);
+  await writeFile(path.join(root, 'posts/example.md'), article('example', '변경된 검색 문장'));
+  const updated = await buildCatalog(root);
+  assert.match(updated.searchIndex[0].text, /변경된 검색 문장/);
+  await rm(path.join(root, 'posts/example.md'));
+  const deleted = await buildCatalog(root);
+  assert.equal(deleted.catalog.posts.length, 0);
+  assert.deepEqual(deleted.searchIndex, []);
+  assert.deepEqual(deleted.catalog.folders, []);
+});
+
+test('relative links retain query strings and heading fragments', async t => {
+  const root = await fixture(t, { 'one/a.md': article('one', '[글](../two/b.md?mode=read#heading)'), 'two/b.md': article('two', '## Heading\n본문') });
+  const result = await buildCatalog(root);
+  assert.match(result.articles.one.html, /href="\/posts\/two\?mode=read#heading"/);
+});
+
+test('missing articles, draft targets, missing assets, and escaping paths fail with a source filename', async t => {
+  for (const body of ['[깨진 링크](missing.md)', '![이미지](missing.png)', '[밖의 파일](../../outside.png)']) {
+    const root = await fixture(t, { 'a.md': article('one', body) });
+    await assert.rejects(buildCatalog(root), /a.md:/);
+  }
+  const root = await fixture(t, { 'a.md': article('one', '[초안](draft.md)'), 'draft.md': article('draft', '작성 중', 'draft: true') });
+  await assert.rejects(buildCatalog(root), /missing or unpublished/);
+});
+
+test('raw HTML and unsafe link protocols are not executable in rendered articles', async t => {
+  const root = await fixture(t, { 'a.md': article('one', '<script>alert(1)</script>\n\n[link](javascript:alert%281%29)\n\n일반 본문') });
+  const result = await buildCatalog(root);
+  assert.doesNotMatch(result.articles.one.html, /<script|href="javascript:/);
+  assert.match(result.articles.one.html, /일반 본문/);
+});
+
+test('inline and display math are rendered while escaped dollars and code stay literal', async t => {
+  const root = await fixture(t, { 'a.md': article('one', '인라인 $x^2$. 금액 \\$10. 코드 `$y$`.\n\n$$z^2$$\n\n```text\n$$not_math$$\n```') });
+  const result = await buildCatalog(root);
+  const html = result.articles.one.html;
+  assert.match(html, /katex-display/);
+  assert.match(html, /금액 \$10/);
+  assert.match(html, /<code>\$y\$<\/code>/);
+  assert.match(html, /\$\$not_math\$\$/);
+});
+
+test('invalid KaTeX commands fail the build instead of shipping red error markup', async t => {
+  const root = await fixture(t, { 'a.md': article('one', '$\\notARealMathCommand{x}$') });
+  await assert.rejects(buildCatalog(root), /a.md:.*KaTeX|a.md:.*render math|a.md:.*Undefined control/i);
+});
+
+test('Mermaid fences preserve escaped source in initial HTML and bypass syntax highlighting', async t => {
+  const root = await fixture(t, { 'a.md': article('diagram', '```mermaid\nflowchart LR\nA["<script>alert(1)</script>"] --> B[끝]\n```\n\n```typescript\nconst diagram = true;\n```') });
+  const result = await buildCatalog(root);
+  const html = result.articles.diagram.html;
+  assert.match(html, /<pre[^>]*data-mermaid=""[^>]*tabindex="0"/);
+  assert.match(html, /<code class="language-mermaid">/);
+  assert.match(html, /flowchart LR/);
+  assert.match(html, /&#x3C;script>|&lt;script>/);
+  assert.doesNotMatch(html, /<script>|<svg/);
+  assert.match(html, /class="shiki/);
+  assert.match(result.searchIndex[0].text, /flowchart LR/);
+});
+
+test('only referenced assets are copied and obsolete assets are removed', async t => {
+  const root = await fixture(t, { 'a.md': article('one', '![test](images/used.svg)'), 'images/used.svg': '<svg/>', 'images/unused.svg': '<svg/>' });
+  const output = await mkdtemp(path.join(tmpdir(), 'soohyuk-output-'));
+  t.after(() => rm(output, { recursive: true, force: true }));
+  await mkdir(path.join(output, '.cache/public/content-assets'), { recursive: true });
+  await writeFile(path.join(output, '.cache/public/content-assets/old.png'), 'old');
+  const result = await buildCatalog(root);
+  await writeContent(result, output);
+  assert.equal(await readFile(path.join(output, '.cache/public/content-assets/images/used.svg'), 'utf8'), '<svg/>');
+  await assert.rejects(readFile(path.join(output, '.cache/public/content-assets/images/unused.svg')), /ENOENT/);
+  await assert.rejects(readFile(path.join(output, '.cache/public/content-assets/old.png')), /ENOENT/);
+});
+
+test('production cannot fall back to examples and GitHub sources are restricted to public repository identifiers', async () => {
+  await assert.rejects(resolveSource({ CF_PAGES: '1', CONTENT_LOCAL_DIR: '/tmp/content' }), /CONTENT_REPOSITORY is required/);
+  assert.equal(repositoryUrl('someone/blog-content'), 'https://github.com/someone/blog-content.git');
+  assert.equal(repositoryUrl('https://github.com/someone/blog-content.git'), 'https://github.com/someone/blog-content.git');
+  assert.throws(() => repositoryUrl('https://user:token@github.com/someone/repository'), /CONTENT_REPOSITORY/);
+  assert.throws(() => repositoryUrl('../outside'), /CONTENT_REPOSITORY/);
+});
+
+test('heading anchors are static, accessible, unique, and excluded from TOC labels', async t => {
+  const root = await fixture(t, { 'example.md': article('example', '## 한글 제목\n\n### 코드 `value`\n\n#### 한글 제목\n\n## 한글 제목') });
+  const { articles } = await buildCatalog(root);
+  const { html, toc } = articles.example;
+  assert.deepEqual(toc.map(entry => entry.text), ['한글 제목', '코드  value', '한글 제목', '한글 제목']);
+  assert.equal(new Set(toc.map(entry => entry.id)).size, 4);
+  for (const entry of toc) {
+    assert.ok(html.includes(`href="#${entry.id}" class="headingAnchor" aria-label="${entry.text} 섹션 링크">#</a>`));
+  }
+});
+
+
+test('default local content uses isolated fixtures and explicit local content takes precedence', async () => {
+  const source = await resolveSource({});
+  assert.equal(source.rootDirectory, path.join(projectDir, 'tests/fixtures/content-repo'));
+  assert.equal(source.sample, true);
+  const local = await resolveSource({ CONTENT_LOCAL_DIR: './custom-content', CONTENT_REPOSITORY: 'unused/repository' });
+  assert.equal(local.rootDirectory, path.resolve('./custom-content'));
+  assert.equal(local.sample, false);
+});
+
+test('copyable content template renders independently from development fixtures', async () => {
+  const result = await buildCatalog(path.join(projectDir, 'examples/content-repo'));
+  assert.deepEqual(result.catalog.posts.map(post => post.slug), ['hello']);
+});

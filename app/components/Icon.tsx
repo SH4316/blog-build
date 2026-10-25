@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 
 const paths = {
+  panel: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></>,
   search: (
     <>
       <circle cx="10.5" cy="10.5" r="6.5" />

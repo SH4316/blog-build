@@ -139,6 +139,7 @@ test('Mermaid renders flowcharts and sequences, follows theme, and survives navi
   await diagrams.nth(0).getByText('다이어그램 소스', { exact: true }).click();
   await expect(diagrams.nth(0).locator('pre')).toBeVisible();
   if (testInfo.project.name === 'mobile') await page.getByRole('button', { name: '폴더 탐색 메뉴 열기' }).click();
+  else await page.getByRole('button', { name: '사이드바 펼치기' }).click();
   await page.getByRole('button', { name: /현재 시스템 테마/ }).click();
   await page.getByRole('button', { name: /현재 라이트 테마/ }).click();
   if (testInfo.project.name === 'mobile') await page.getByRole('button', { name: '폴더 탐색 메뉴 닫기' }).click();
@@ -180,4 +181,36 @@ test('Mermaid sources are readable with JavaScript disabled', async ({ browser }
     await expect(page.locator('pre[data-mermaid]').first()).toBeVisible();
     await expect(page.locator('pre[data-mermaid]').first()).toContainText('flowchart LR');
   } finally { await context.close(); }
+});
+
+
+test('sidebar collapses on article navigation and can be reopened', async ({ page }, testInfo) => {
+  await page.goto('/');
+  if (testInfo.project.name === 'mobile') {
+    await page.getByRole('button', { name: '폴더 탐색 메뉴 열기' }).click();
+    await page.getByRole('dialog').getByRole('link', { name: '경사하강법을 수식과 코드로 따라가기' }).click();
+    await expect(page.getByRole('dialog')).not.toBeVisible();
+    await page.getByRole('button', { name: '폴더 탐색 메뉴 열기' }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).not.toBeVisible();
+  } else {
+    const sidebar = page.locator('#desktop-sidebar');
+    await page.getByRole('button', { name: '사이드바 접기' }).click();
+    await expect(sidebar).toHaveAttribute('inert', '');
+    await page.getByRole('button', { name: '사이드바 펼치기' }).click();
+    await expect(sidebar).not.toHaveAttribute('inert', '');
+    await sidebar.getByRole('link', { name: '경사하강법을 수식과 코드로 따라가기' }).click();
+    await expect(page.getByRole('button', { name: '사이드바 펼치기' })).toHaveAttribute('aria-expanded', 'false');
+    await expect(sidebar).toHaveAttribute('inert', '');
+    await page.getByRole('button', { name: '사이드바 펼치기' }).click();
+    await expect(sidebar.getByRole('link', { name: 'Soohyuk 홈' })).toBeVisible();
+    await page.reload();
+    await expect(sidebar).toHaveAttribute('inert', '');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await expect(sidebar).toHaveCSS('transition-duration', '0s');
+    await page.getByRole('button', { name: '사이드바 펼치기' }).click();
+    await expect(sidebar).not.toHaveAttribute('inert', '');
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

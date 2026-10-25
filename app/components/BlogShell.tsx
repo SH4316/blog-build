@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router';
 import type { Catalog } from '~/lib/types';
@@ -185,18 +185,24 @@ function Sidebar({
       <div className={styles.identity}>
         <Brand />
       </div>
-      <nav className={styles.toolLinks} aria-label="개발 도구">
-        <a href="https://formatter.soohyuk.dev" target="_blank" rel="noopener noreferrer">
-          Formatter
-          <Icon name="external" size={12} />
-          <span className="srOnly"> (새 탭)</span>
-        </a>
-        <a href="https://base64.soohyuk.dev" target="_blank" rel="noopener noreferrer">
-          Base64
-          <Icon name="external" size={12} />
-          <span className="srOnly"> (새 탭)</span>
-        </a>
-      </nav>
+      <details className={styles.toolsDisclosure}>
+        <summary className={styles.toolsSummary}>
+          <span>Tools</span>
+          <Icon name="chevron" size={12} className={styles.chevron} />
+        </summary>
+        <nav className={styles.toolLinks} aria-label="개발 도구">
+          <a href="https://formatter.soohyuk.dev" target="_blank" rel="noopener noreferrer">
+            Formatter
+            <Icon name="external" size={12} />
+            <span className="srOnly"> (새 탭)</span>
+          </a>
+          <a href="https://base64.soohyuk.dev" target="_blank" rel="noopener noreferrer">
+            Base64
+            <Icon name="external" size={12} />
+            <span className="srOnly"> (새 탭)</span>
+          </a>
+        </nav>
+      </details>
       <Link to="/search" className={styles.searchLink}>
         <Icon name="search" size={16} />
         <span>글 검색</span>
@@ -292,10 +298,39 @@ export function BlogShell({ catalog, children }: { catalog: Catalog; children: R
   const theme = useThemePreference();
   const drawer = useRef<HTMLDialogElement>(null);
   const location = useLocation();
+  // Render the final state on direct visits; only later navigation transitions it.
+  const [collapsed, setCollapsed] = useState(() => location.pathname.startsWith('/posts/'));
+  const toggle = useRef<HTMLButtonElement>(null);
+  const sidebar = useRef<HTMLElement>(null);
+  const closingAnimation = useRef<Animation | null>(null);
+  const closeDrawer = useCallback(() => {
+    const dialog = drawer.current;
+    if (!dialog?.open || closingAnimation.current) return;
+    const panel = dialog.firstElementChild;
+    if (!panel || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      dialog.close();
+      return;
+    }
+    const animation = panel.animate(
+      [{ transform: 'translateX(0)' }, { transform: 'translateX(-100%)' }],
+      { duration: 180, easing: 'ease-in', fill: 'forwards' },
+    );
+    closingAnimation.current = animation;
+    animation.onfinish = () => {
+      dialog.close();
+      animation.cancel();
+      closingAnimation.current = null;
+    };
+  }, []);
   const navigate = useNavigate();
   useEffect(() => {
-    drawer.current?.close();
-  }, [location.pathname]);
+    closeDrawer();
+    if (location.pathname.startsWith('/posts/')) {
+      if (sidebar.current?.contains(document.activeElement)) toggle.current?.focus();
+      setCollapsed(true);
+    }
+  }, [location.pathname, closeDrawer]);
+  useEffect(() => () => closingAnimation.current?.cancel(), []);
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
@@ -312,7 +347,18 @@ export function BlogShell({ catalog, children }: { catalog: Catalog; children: R
       <a href="#main" className={styles.skipLink}>
         본문으로 건너뛰기
       </a>
-      <aside className={styles.sidebar}>
+      <button
+        ref={toggle}
+        className={`${styles.iconButton} ${styles.sidebarToggle} ${collapsed ? styles.toggleCollapsed : ''}`}
+        onClick={() => setCollapsed((value) => !value)}
+        aria-label={`사이드바 ${collapsed ? '펼치기' : '접기'}`}
+        aria-expanded={!collapsed}
+        aria-controls="desktop-sidebar"
+        title={`사이드바 ${collapsed ? '펼치기' : '접기'}`}
+      >
+        <Icon name="panel" />
+      </button>
+      <aside ref={sidebar} id="desktop-sidebar" className={`${styles.sidebar} ${collapsed ? styles.sidebarCollapsed : ''}`} inert={collapsed}>
         <Sidebar catalog={catalog} theme={theme} />
       </aside>
       <header className={styles.mobileHeader}>
@@ -334,14 +380,15 @@ export function BlogShell({ catalog, children }: { catalog: Catalog; children: R
         ref={drawer}
         className={styles.drawer}
         aria-label="폴더 탐색 메뉴"
+        onCancel={(event) => { event.preventDefault(); closeDrawer(); }}
         onClick={(event) => {
-          if (event.target === event.currentTarget) drawer.current?.close();
+          if (event.target === event.currentTarget) closeDrawer();
         }}
       >
         <div className={styles.drawerContent}>
           <button
             className={`${styles.iconButton} ${styles.closeButton}`}
-            onClick={() => drawer.current?.close()}
+            onClick={closeDrawer}
             aria-label="폴더 탐색 메뉴 닫기"
           >
             <Icon name="close" />
@@ -349,16 +396,18 @@ export function BlogShell({ catalog, children }: { catalog: Catalog; children: R
           <Sidebar catalog={catalog} theme={theme} />
         </div>
       </dialog>
-      <main id="main" className={styles.main} tabIndex={-1}>
-        {catalog.sample && <div className={styles.sampleNotice}>샘플 콘텐츠</div>}
-        {children}
-        <footer className={styles.mainFooter}>
-          <span>© {new Date().getUTCFullYear()} Soohyuk</span>
-          <a href="/rss.xml">
-            RSS로 구독하기 <Icon name="arrow" size={13} />
-          </a>
-        </footer>
-      </main>
+      <div className={`${styles.readingLayout} ${collapsed ? styles.readingExpanded : ''}`}>
+        <main id="main" className={styles.main} tabIndex={-1}>
+          {catalog.sample && <div className={styles.sampleNotice}>샘플 콘텐츠</div>}
+          {children}
+          <footer className={styles.mainFooter}>
+            <span>© {new Date().getUTCFullYear()} Soohyuk</span>
+            <a href="/rss.xml">
+              RSS로 구독하기 <Icon name="arrow" size={13} />
+            </a>
+          </footer>
+        </main>
+      </div>
     </>
   );
 }

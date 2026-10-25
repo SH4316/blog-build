@@ -6,9 +6,14 @@
 .brand:hover .brandMark { background: var(--brand-hover-bg); }
 .brandMark svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .brandDot { color: var(--brand-dot); }
-.toolLinks { display: flex; align-items: center; gap: 19px; padding: 0 8px; margin-bottom: 20px; }
-.toolLinks a { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
-.toolLinks a:hover { color: var(--accent); }
+.toolsDisclosure { flex-shrink: 0; margin-bottom: 16px; }
+.toolsSummary { display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding: 8px; border-radius: 6px; color: var(--muted); font-size: 13px; font-weight: 550; list-style: none; cursor: pointer; }
+.toolsSummary::-webkit-details-marker { display: none; }
+.toolsSummary:hover { color: var(--accent); background: var(--surface); }
+.toolsDisclosure[open] > .toolsSummary .chevron { transform: rotate(90deg); }
+.toolLinks { display: flex; flex-direction: column; padding: 2px 0 0 12px; }
+.toolLinks a { display: flex; align-items: center; gap: 6px; min-height: 40px; padding: 8px; border-radius: 5px; color: var(--muted); font-size: 12px; }
+.toolLinks a:hover { color: var(--accent); background: var(--surface); }
 .searchLink { min-height: 39px; display: flex; align-items: center; gap: 9px; border: 1px solid var(--border); border-radius: 7px; padding: 7px 10px; color: var(--muted); font-size: 13px; background: var(--bg); }
 .searchLink:hover { color: var(--accent); border-color: var(--accent); }
 .searchLink kbd { margin-left: auto; font-size: 12px; border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; white-space: nowrap; }
@@ -78,4 +83,23 @@
 @keyframes drawerIn { from { transform: translateX(-16px); clip-path: inset(0 15% 0 0); } to { transform: translateX(0); clip-path: inset(0); } }
 @media (max-width: 420px) {
   .mainFooter { font-size: 12px; padding-inline: 20px; }
+}
+
+/* Keep the navigation and reading area in step during collapse. */
+@media (min-width: 900px) {
+  .sidebar { transition: transform 260ms cubic-bezier(.16, 1, .3, 1); }
+  .sidebarCollapsed { transform: translateX(-100%); }
+  .sidebar .identity { padding-right: 30px; }
+  .sidebarToggle { position: fixed; z-index: 21; top: 32px; left: 12px; transform: translateX(calc(var(--sidebar-width) - 64px)); background: var(--sidebar-bg); border: 1px solid var(--border); transition: transform 260ms cubic-bezier(.16, 1, .3, 1); }
+  .toggleCollapsed { transform: translateX(0); }
+  .readingLayout { display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr); transition: grid-template-columns 260ms cubic-bezier(.16, 1, .3, 1); }
+  .readingExpanded { grid-template-columns: 64px minmax(0, 1fr); }
+  .main { grid-column: 2; min-width: 0; margin-left: 0; }
+}
+@media (max-width: 899px) {
+  .sidebarToggle { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar, .sidebarToggle, .readingLayout { transition: none; }
+  .drawer[open] .drawerContent { animation: none; }
 }

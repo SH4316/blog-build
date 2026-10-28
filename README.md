@@ -80,21 +80,21 @@ CONTENT_BRANCH=main
 ```text
 글 저장소 main 변경 → GitHub Actions → Pages Deploy Hook
 → 코드와 최신 콘텐츠 다운로드 → Markdown 처리 → React Router SSG
-→ RSS·sitemap·404 생성 → Pages 배포
+→ sitemap·404 생성 → Pages 배포
 ```
 
 ### blog.soohyuk.dev 연결
 
 Pages 프로젝트의 **Custom domains → Set up a custom domain**에서 `blog.soohyuk.dev`를 먼저 등록합니다. 같은 Cloudflare 계정에서 DNS를 관리한다면 안내에 따라 레코드를 생성합니다. 외부 DNS를 사용한다면 Pages가 안내하는 프로젝트의 `*.pages.dev` 주소로 `blog` CNAME을 연결합니다. 기존 `blog` DNS 레코드가 있다면 충돌을 확인하세요.
 
-도메인이 Active가 된 뒤 글 본문, canonical, RSS, sitemap과 직접 접속/새로고침을 확인합니다. 별도 서버나 Cloudflare API 토큰은 이 구성에 필요하지 않습니다.
+도메인이 Active가 된 뒤 글 본문, canonical, sitemap과 직접 접속/새로고침을 확인합니다. 별도 서버나 Cloudflare API 토큰은 이 구성에 필요하지 않습니다.
 
 ## 구성과 동작
 
 - `app/`: React 화면, 폴더 트리, 목록, 글, 목차, 태그, 검색, 테마. CSS Modules로 스타일링합니다.
 - `scripts/prepare.mjs`: 생성 정적 폴더를 초기화하고 콘텐츠·라이선스를 차례로 생성합니다. `dev`, `build`, `typecheck`, `sync:content`가 공통으로 사용합니다.
-- `public/`: favicon 등 직접 관리하는 정적 원본만 보관합니다. 원본과 생성된 검색 인덱스·이미지·피드·라이선스 고지는 `.cache/public/`에 모이며, Vite가 개발 서버와 배포 빌드에 사용합니다.
-- `scripts/content.mjs`: 콘텐츠 동기화, YAML 검증, Markdown/GFM·KaTeX·Shiki 렌더링, 링크·이미지 변환, 검색 인덱스 생성. 개발 서버에서도 사용할 RSS·sitemap·OG 이미지를 함께 생성합니다.
+- `public/`: favicon 등 직접 관리하는 정적 원본만 보관합니다. 원본과 생성된 검색 인덱스·이미지·라이선스 고지는 `.cache/public/`에 모이며, Vite가 개발 서버와 배포 빌드에 사용합니다.
+- `scripts/content.mjs`: 콘텐츠 동기화, YAML 검증, Markdown/GFM·KaTeX·Shiki 렌더링, 링크·이미지 변환, 검색 인덱스 생성. 개발 서버에서도 사용할 sitemap·OG 이미지를 함께 생성합니다.
 - `app/components/ArticleContent.tsx`: Mermaid 코드 블록이 있는 글에서만 렌더러를 불러와 다이어그램을 표시합니다. 테마 변경에 맞춰 다시 그리며, 소스와 오류 시 다시 시도를 제공합니다. JavaScript가 꺼진 경우에도 소스 코드는 초기 HTML에 남습니다.
 - `scripts/licenses.mjs`: 직접·간접 의존성의 실제 버전과 라이선스를 확인하고 배포할 원문 고지를 생성합니다. [라이선스 목록](docs/THIRD_PARTY_NOTICES.md)을 갱신하며 빌드 검증에서 `/third-party-notices.txt` 누락을 검사합니다.
 - `react-router.config.ts`: 공개 글·폴더·태그 URL을 열거해 `ssr: false`로 사전 렌더링.

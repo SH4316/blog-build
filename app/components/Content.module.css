@@ -185,7 +185,7 @@
 .yearGroup { margin-top: 28px; }
 .yearHeading { margin: 0; color: var(--muted); font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .rowContent mark { color: var(--text); background: var(--accent-soft); font-weight: 600; }
-.tocLinks .activeToc::before { content: ''; position: absolute; inset-block: 0; inset-inline-start: -8px; width: 2px; background: var(--brand-bg); }
+.tocLinks .activeToc::before { content: ''; position: absolute; inset-block: 0; inset-inline-start: -8px; width: 2px; background: var(--accent); }
 .prose :global(.headingAnchor) { margin-inline-start: .4em; opacity: 0; text-decoration: none; }
 .prose :is(h2, h3, h4):hover :global(.headingAnchor), .prose :is(h2, h3, h4):focus-within :global(.headingAnchor) { opacity: 1; }
 .codeBlock { margin: 25px 0 29px; min-width: 0; }

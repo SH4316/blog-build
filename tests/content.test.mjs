@@ -85,6 +85,47 @@ test('relative links retain query strings and heading fragments', async t => {
   assert.match(result.articles.one.html, /href="\/posts\/two\?mode=read#heading"/);
 });
 
+test('wiki links resolve filenames, aliases, paths, and Korean heading fragments to stable URLs', async t => {
+  const root = await fixture(t, {
+    'notes/start.md': article('start', '[[문서]] [[문서|표시 이름]] [[../reference/문서.md]] [[reference/문서]] [[posts/reference/문서]] [[문서#한글 제목]] [[#현재 제목|여기]]\n\n## 현재 제목'),
+    'reference/문서.md': article('stable-url', '## 한글 제목'),
+  });
+  const result = await buildCatalog(root);
+  const html = result.articles.start.html;
+  assert.equal((html.match(/href="\/posts\/stable-url"/g) || []).length, 5);
+  assert.match(html, /href="\/posts\/stable-url">표시 이름<\/a>/);
+  assert.ok(html.includes(`href="/posts/stable-url#${encodeURIComponent('한글-제목')}"`));
+  assert.ok(html.includes(`href="/posts/start#${encodeURIComponent('현재-제목')}"`));
+  assert.ok(!result.searchIndex.find(item => item.slug === 'start').text.includes('[['));
+});
+
+test('wiki links prefer a sibling and reject ambiguous, missing, and unpublished targets', async t => {
+  const files = {
+    'one/start.md': article('start', '[[target]]'),
+    'one/target.md': article('near'),
+    'two/target.md': article('far'),
+  };
+  const root = await fixture(t, files);
+  assert.match((await buildCatalog(root)).articles.start.html, /href="\/posts\/near"/);
+  for (const [body, expected] of [
+    ['[[target]]', /ambiguous wiki link/],
+    ['[[missing]]', /missing or unpublished/],
+    ['[[draft]]', /missing or unpublished/],
+    ['[[one/target#^block]]', /block links are not supported/],
+  ]) {
+    const invalid = await fixture(t, { ...files, 'start.md': article('root-start', body), 'draft.md': article('draft', '', 'draft: true') });
+    await assert.rejects(buildCatalog(invalid), expected);
+  }
+});
+
+test('wiki syntax in code, math, embeds, and existing links stays literal', async t => {
+  const root = await fixture(t, { 'start.md': article('start', '`[[missing]]`\n\n```text\n[[missing]]\n```\n\n$[[x]]$\n\n![[missing]]\n\n[See [[missing]]](https://example.com)') });
+  const { html } = (await buildCatalog(root)).articles.start;
+  assert.match(html, /<code>\[\[missing\]\]<\/code>/);
+  assert.match(html, /!\[\[missing\]\]/);
+  assert.match(html, /href="https:\/\/example.com">See \[\[missing\]\]<\/a>/);
+});
+
 test('missing articles, draft targets, missing assets, and escaping paths fail with a source filename', async t => {
   for (const body of ['[깨진 링크](missing.md)', '![이미지](missing.png)', '[밖의 파일](../../outside.png)']) {
     const root = await fixture(t, { 'a.md': article('one', body) });

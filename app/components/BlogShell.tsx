@@ -9,11 +9,13 @@ import styles from './Shell.module.css';
 function Brand() {
   return (
     <Link className={styles.brand} to="/" aria-label="Soohyuk 홈">
-      <span className={styles.brandMark}>
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="m6 7 5 5-5 5m8 0h5" />
-        </svg>
-      </span>
+      <img
+        className={styles.brandMark}
+        src="/github-avatar.png"
+        alt=""
+        width={34}
+        height={34}
+      />
       <span>
         Soohyuk<span className={styles.brandDot}>.</span>
       </span>
@@ -283,10 +285,6 @@ function Sidebar({
           <span className="srOnly"> (새 탭)</span>
         </a>
         <div className={styles.footerActions}>
-          <a href="/rss.xml" className={styles.feedLink}>
-            <Icon name="rss" size={16} />
-            RSS
-          </a>
           <ThemeToggle theme={theme} />
         </div>
       </div>
@@ -402,9 +400,6 @@ export function BlogShell({ catalog, children }: { catalog: Catalog; children: R
           {children}
           <footer className={styles.mainFooter}>
             <span>© {new Date().getUTCFullYear()} Soohyuk</span>
-            <a href="/rss.xml">
-              RSS로 구독하기 <Icon name="arrow" size={13} />
-            </a>
           </footer>
         </main>
       </div>

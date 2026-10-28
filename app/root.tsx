@@ -43,10 +43,9 @@ export function Layout({ children }: { children: ReactNode }) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <meta name="theme-color" content="#02815e" media="(prefers-color-scheme: light)" />
-        <meta name="theme-color" content="#101710" media="(prefers-color-scheme: dark)" />
+        <meta name="theme-color" content="#1d4ed8" media="(prefers-color-scheme: light)" />
+        <meta name="theme-color" content="#101827" media="(prefers-color-scheme: dark)" />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-        <link rel="alternate" type="application/rss+xml" title="Soohyuk RSS" href="/rss.xml" />
         <script dangerouslySetInnerHTML={{ __html: initializeTheme }} />
         <Meta />
         <Links />

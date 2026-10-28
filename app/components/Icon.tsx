@@ -41,12 +41,6 @@ const paths = {
       <path d="M8 21h8m-4-4v4" />
     </>
   ),
-  rss: (
-    <>
-      <path d="M4 11a9 9 0 0 1 9 9M4 4a16 16 0 0 1 16 16" />
-      <circle cx="5" cy="19" r="1" />
-    </>
-  ),
   home: (
     <>
       <path d="m3 10 9-7 9 7v11H3Z" />

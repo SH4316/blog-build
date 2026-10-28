@@ -7,34 +7,29 @@
   unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
 }
 :root {
-  /* RGB channel + N(mean=0, variance=5), rounded and clamped to [0,255].
-     Python random.Random(20261016), sigma=sqrt(5); alpha remains ff.
-     Samples are fixed: theme changes and page loads never resample. */
-  --c-v7m2: #02815eff;
-  --c-k4p9: #299349ff;
-  --c-r8w3: #54a12dff;
-  --c-n2f6: #80bc19ff;
-  --c-b9s4: #abc900ff;
-  --c-h3d8: #bcd200ff;
-  --c-x6q1: #d6d500ff;
-  --c-t5j7: #dce100ff;
-  --c-a4u9: #edf01fff;
-  --c-e8z2: #fdfd3fff;
+  /* Fixed blue palette, from saturated accents to pale reading surfaces. */
+  --c-v7m2: #1d4ed8;
+  --c-k4p9: #2563eb;
+  --c-r8w3: #377cf0;
+  --c-n2f6: #5196f5;
+  --c-b9s4: #71b0fa;
+  --c-h3d8: #91c5fc;
+  --c-x6q1: #b4d8fd;
+  --c-t5j7: #d5e8ff;
+  --c-a4u9: #eaf3ff;
+  --c-e8z2: #f3f8ff;
   --bg: #ffffff;
-  --sidebar-bg: #fbfdf4;
-  --surface: #fcfbe9;
-  --text: #14261c;
-  --muted: #516950;
-  --border: #e7ecc7;
+  --sidebar-bg: #f5f8ff;
+  --surface: #edf3fc;
+  --text: #182741;
+  --muted: #536581;
+  --border: #dbe4f2;
   --accent: var(--c-v7m2);
-  --accent-soft: #f7fae0;
-  --code-bg: #fdfef4;
-  --brand-bg: var(--c-b9s4);
-  --brand-hover-bg: var(--c-a4u9);
-  --brand-ink: #14261c;
-  --brand-dot: var(--c-r8w3);
-  --selection-bg: var(--c-e8z2);
-  --selection-ink: var(--brand-ink);
+  --accent-soft: #e6efff;
+  --code-bg: #f7f9fd;
+  --brand-dot: var(--accent);
+  --selection-bg: var(--c-t5j7);
+  --selection-ink: #182741;
   --sidebar-width: 264px;
   color-scheme: light;
   font-family: 'IBM Plex Sans Variable', 'Noto Sans KR Variable', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
@@ -44,16 +39,17 @@
   accent-color: var(--accent);
 }
 :root[data-theme='dark'] {
-  --bg: #101710;
-  --sidebar-bg: #0a120b;
-  --surface: #1d2712;
-  --text: #fffff4;
-  --muted: #9eae98;
-  --border: #31401d;
-  --accent: var(--c-x6q1);
-  --accent-soft: #283715;
-  --code-bg: #0c130d;
-  --brand-dot: var(--c-t5j7);
+  --bg: #101827;
+  --sidebar-bg: #0c1422;
+  --surface: #16243a;
+  --text: #e5edf9;
+  --muted: #9aacc6;
+  --border: #283b58;
+  --accent: var(--c-h3d8);
+  --accent-soft: #1c3151;
+  --code-bg: #0d1625;
+  --selection-bg: #244e80;
+  --selection-ink: #e5edf9;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -90,5 +86,5 @@ pre, code, kbd { font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberat
 [data-theme='dark'] .shiki span { color: var(--shiki-dark); }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: 0s !important; }
 }

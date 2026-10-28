@@ -18,7 +18,7 @@ A readable development blog at https://blog.soohyuk.dev that updates automatical
 Application code and public Markdown content live in separate GitHub repositories. Content directories are visible categories; each Markdown file is an article. Frontmatter contains a permanent slug independent of its directory. GitHub Actions calls a Pages deploy hook; Pages fetches content and builds static HTML.
 
 ## Capabilities and Constraints
-Include nested folder navigation, latest articles, tags, browser-side full-text search, article table of contents, syntax highlighting, inline and display math, Mermaid diagrams, light/dark themes, RSS, and SEO. The desktop layout has a left folder tree, a central reading column, and a right table of contents. Mobile navigation opens as a menu. The content repository has not been created yet; provide a copyable template and local sample content. Production must require an explicitly configured content repository.
+Include nested folder navigation, latest articles, tags, browser-side full-text search, article table of contents, syntax highlighting, inline and display math, Mermaid diagrams, light/dark themes, and SEO. The desktop layout has a left folder tree, a central reading column, and a right table of contents. Mobile navigation opens as a menu. The content repository has not been created yet; provide a copyable template and local sample content. Production must require an explicitly configured content repository.
 
 ## Brand Commitments
 Use Soohyuk as the site identity and blog.soohyuk.dev as the canonical domain. Prioritize the agreed reading and folder navigation layout.

@@ -6,4 +6,4 @@ tags: [draft-only-tag]
 draft: true
 ---
 
-이 글과 draft-only-tag는 블로그, 검색, RSS, sitemap에 나타나지 않아야 합니다.
+이 글과 draft-only-tag는 블로그, 검색, sitemap에 나타나지 않아야 합니다.

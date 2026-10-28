@@ -16,7 +16,7 @@ import rehypeKatex from 'rehype-katex';
 import rehypeStringify from 'rehype-stringify';
 import { visit } from 'unist-util-visit';
 import { createHighlighter } from 'shiki';
-import { writeFeeds } from './feeds.mjs';
+import { writeSiteAssets } from './site-assets.mjs';
 
 const exec = promisify(execFile);
 export const projectDir = fileURLToPath(new URL('../', import.meta.url));
@@ -110,6 +110,57 @@ function referencePath(value, sourcePath) {
   return { relative, suffix };
 }
 
+function wikiLinks({ post, allPosts }) {
+  function resolve(value) {
+    const [destination, ...headingParts] = value.split('#');
+    const name = destination.trim().replace(/\.md$/i, '');
+    let target = post;
+    if (name) {
+      const source = `${name}.md`;
+      const relative = path.posix.normalize(path.posix.join(post.folder, source));
+      const root = source.replace(/^\/?posts\//, '').replace(/^\//, '');
+      target = allPosts.find(item => item.sourcePath === relative)
+        || allPosts.find(item => item.sourcePath === root);
+      if (!target && !name.startsWith('.')) {
+        const matches = allPosts.filter(item => item.sourcePath === source || item.sourcePath.endsWith(`/${source}`));
+        if (matches.length > 1) throw new Error(`${post.sourcePath}: ambiguous wiki link: ${value}; use a folder path`);
+        target = matches[0];
+      }
+      if (!target || target.draft) throw new Error(`${post.sourcePath}: linked article is missing or unpublished: ${value}`);
+    }
+    let fragment = '';
+    if (headingParts.length) {
+      const heading = headingParts.join('#').trim();
+      if (heading.startsWith('^')) throw new Error(`${post.sourcePath}: wiki block links are not supported: ${value}`);
+      // Use the same heading ID generator as the rendered article.
+      const tree = { type: 'root', children: [{ type: 'element', tagName: 'h2', properties: {}, children: [{ type: 'text', value: heading }] }] };
+      unified().use(rehypeSlug).runSync(tree);
+      fragment = `#${encodeURIComponent(tree.children[0].properties.id)}`;
+    }
+    return `/posts/${encodeURIComponent(target.slug)}${fragment}`;
+  }
+  return () => tree => {
+    function transform(parent) {
+      if (!parent.children || ['link', 'linkReference'].includes(parent.type)) return;
+      parent.children = parent.children.flatMap(node => {
+        if (node.type !== 'text') { transform(node); return [node]; }
+        const parts = [];
+        let cursor = 0;
+        for (const match of node.value.matchAll(/(?<!!)\[\[([^\[\]\n]+)\]\]/g)) {
+          const [destination, ...alias] = match[1].split('|');
+          parts.push({ type: 'text', value: node.value.slice(cursor, match.index) });
+          parts.push({ type: 'link', url: resolve(destination.trim()), children: [{ type: 'text', value: alias.length ? alias.join('|') : destination }] });
+          cursor = match.index + match[0].length;
+        }
+        if (!cursor) return [node];
+        parts.push({ type: 'text', value: node.value.slice(cursor) });
+        return parts;
+      });
+    }
+    transform(tree);
+  };
+}
+
 function rewriteReferences({ post, bySource, files, usedAssets }) {
   return () => tree => visit(tree, 'element', node => {
     const key = node.tagName === 'img' ? 'src' : node.tagName === 'a' ? 'href' : null;
@@ -176,9 +227,11 @@ export async function buildCatalog(rootDirectory, { sample = false, revision = n
   const shiki = await highlighter();
   for (const post of published) {
     const markdownTree = unified().use(remarkParse).use(remarkGfm).use(remarkMath).parse(post.body);
+    wikiLinks({ post, allPosts })()(markdownTree);
     const plainText = textOf(markdownTree).replace(/\s+/g, ' ').trim();
     const toc = [];
     const result = await unified().use(remarkParse).use(remarkGfm).use(remarkMath).use(doubleDollarDisplay)
+      .use(wikiLinks({ post, allPosts }))
       .use(remarkRehype).use(rewriteReferences({ post, bySource, files, usedAssets }))
       .use(rehypeSanitize, mathSchema).use(rehypeSlug)
       .use(enhanceContent(toc, shiki)).use(rehypeKatex, { trust: false, strict: 'error', output: 'htmlAndMathml' })
@@ -256,7 +309,7 @@ async function main() {
   await writeContent(result);
   const publicDirectory = path.join(projectDir, '.cache/public');
   await cp(path.join(projectDir, 'public'), publicDirectory, { recursive: true });
-  await writeFeeds(publicDirectory, result.catalog, siteUrl);
+  await writeSiteAssets(publicDirectory, result.catalog, siteUrl);
   console.log(`Content: ${result.catalog.posts.length} articles, ${result.catalog.folders.length} folders (${source.sample ? 'local test fixtures' : source.revision || 'local repository'})`);
 }
 

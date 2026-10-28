@@ -84,12 +84,13 @@ test('missing URLs return actual 404s and drafts are absent from public artifact
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('페이지를 찾을 수 없습니다.');
   const robots = page.locator('meta[name="robots"]');
   await expect(robots).toHaveAttribute('content', /noindex/);
-  for (const url of ['/sitemap.xml', '/rss.xml', '/search-index.json']) {
+  for (const url of ['/sitemap.xml', '/search-index.json']) {
     const response = await request.get(url);
     expect(response.status()).toBe(200);
     expect(await response.text()).not.toContain('next-post-draft');
     expect(await response.text()).not.toContain('draft-only-tag');
   }
+  expect((await request.get('/rss.xml')).status()).toBe(404);
   expect((await request.get('/posts/next-post-draft')).status()).toBe(404);
 });
 

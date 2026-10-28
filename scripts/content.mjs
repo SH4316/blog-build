@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, readFile, writeFile, readdir, rm, mkdtemp, rename, copyFile, cp } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, readdir, rm, mkdtemp, rename, copyFile, cp, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
@@ -17,11 +17,14 @@ import rehypeStringify from 'rehype-stringify';
 import { visit } from 'unist-util-visit';
 import { createHighlighter } from 'shiki';
 import { writeSiteAssets } from './site-assets.mjs';
+import { buildShorts } from './shorts.mjs';
+import { createShortPreviewResolver } from './short-previews.mjs';
 
 const exec = promisify(execFile);
 export const projectDir = fileURLToPath(new URL('../', import.meta.url));
 export const siteUrl = 'https://blog.soohyuk.dev';
 let highlighterPromise;
+const imageExtension = /\.(?:apng|avif|bmp|gif|ico|jpe?g|png|svg|webp)$/i;
 const mathSchema = {
   ...defaultSchema,
   attributes: {
@@ -42,6 +45,7 @@ function highlighter() {
 }
 
 export async function walk(directory, prefix = '') {
+  if ((await lstat(directory)).isSymbolicLink()) throw new Error(`Symbolic links are not supported: ${prefix || path.basename(directory)}`);
   const files = [];
   for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name, 'en'))) {
     if (entry.name.startsWith('.')) continue;
@@ -101,16 +105,76 @@ function doubleDollarDisplay() {
   });
 }
 
-function referencePath(value, sourcePath) {
+function localPath(value, sourcePath) {
   const [, pathname, suffix = ''] = /^([^?#]*)([?#].*)?$/.exec(value);
   let decoded;
   try { decoded = decodeURIComponent(pathname); } catch { throw new Error(`${sourcePath}: invalid encoded path ${value}`); }
-  const relative = path.posix.normalize(path.posix.join(path.posix.dirname(sourcePath), decoded));
-  if (relative === '..' || relative.startsWith('../') || relative.includes('\\') || relative.includes('\0')) throw new Error(`${sourcePath}: link leaves the posts directory: ${value}`);
+  if (decoded.includes('\\') || decoded.includes('\0') || decoded.split('/').some(segment => segment.startsWith('.') && segment !== '.' && segment !== '..')) {
+    throw new Error(`${sourcePath}: local paths cannot contain hidden files, backslashes, or null characters: ${value}`);
+  }
+  return { decoded, suffix };
+}
+
+function allowedAssetPath(relative, value, sourcePath) {
+  if (!relative.startsWith('posts/') && !relative.startsWith('images/')) throw new Error(`${sourcePath}: link leaves the posts and images directories: ${value}`);
+  return relative;
+}
+
+function referencePath(value, sourcePath) {
+  const { decoded, suffix } = localPath(value, sourcePath);
+  const relative = allowedAssetPath(path.posix.normalize(path.posix.join('posts', path.posix.dirname(sourcePath), decoded)), value, sourcePath);
   return { relative, suffix };
 }
 
-function wikiLinks({ post, allPosts }) {
+function assetUrl(relative) {
+  const rootImage = relative.startsWith('images/');
+  return `${rootImage ? '/content-images/' : '/content-assets/'}${relative.slice(rootImage ? 7 : 6).split('/').map(encodeURIComponent).join('/')}`;
+}
+
+function textSourceOffsets(original) {
+  const offsets = [];
+  for (let index = 0; index < original.length;) {
+    let raw = original[index];
+    let decoded = raw;
+    if (raw === '\\' && /[\u0021-\u002f\u003a-\u0040\u005b-\u0060\u007b-\u007e]/.test(original[index + 1] || '')) {
+      raw = original.slice(index, index + 2);
+      decoded = raw[1];
+    } else if (raw === '&') {
+      const entity = /^&(?:#(?:[xX][\da-fA-F]+|\d+)|[A-Za-z][A-Za-z\d]+);/.exec(original.slice(index));
+      if (entity) {
+        raw = entity[0];
+        decoded = textOf(unified().use(remarkParse).parse(raw));
+      }
+    }
+    offsets.push(...Array(decoded.length).fill(index));
+    index += raw.length;
+  }
+  offsets.push(original.length);
+  return offsets;
+}
+
+function wikiLinks({ post, allPosts, files, usedAssets }) {
+  function image(value, alias) {
+    const { decoded, suffix } = localPath(value, post.sourcePath);
+    const explicit = /^\/?(?:posts|images)\//.test(decoded);
+    const relative = allowedAssetPath(path.posix.normalize(explicit ? decoded.replace(/^\//, '') : path.posix.join('posts', post.folder, decoded)), value, post.sourcePath);
+    let target = files.has(relative) ? relative : undefined;
+    if (!target && !explicit && !decoded.startsWith('.')) {
+      const matches = [...files].filter(file => imageExtension.test(file) && (file === `posts/${decoded}` || file.endsWith(`/${decoded}`)));
+      if (matches.length > 1) throw new Error(`${post.sourcePath}: ambiguous wiki image: ${value}; use a folder path`);
+      target = matches[0];
+    }
+    if (!target) throw new Error(`${post.sourcePath}: local image does not exist: ${value}`);
+    usedAssets.add(target);
+    const size = /^(\d{1,5})(?:x(\d{1,5}))?$/.exec(alias);
+    const dimensions = size && size.slice(1).filter(Boolean).every(value => Number(value) > 0)
+      ? { width: Number(size[1]), ...(size[2] ? { height: Number(size[2]) } : {}) } : {};
+    return {
+      type: 'image', url: `${assetUrl(target)}${suffix}`,
+      alt: alias && !Object.keys(dimensions).length ? alias : path.posix.basename(decoded),
+      ...(Object.keys(dimensions).length ? { data: { hProperties: dimensions } } : {}),
+    };
+  }
   function resolve(value) {
     const [destination, ...headingParts] = value.split('#');
     const name = destination.trim().replace(/\.md$/i, '');
@@ -146,10 +210,18 @@ function wikiLinks({ post, allPosts }) {
         if (node.type !== 'text') { transform(node); return [node]; }
         const parts = [];
         let cursor = 0;
-        for (const match of node.value.matchAll(/(?<!!)\[\[([^\[\]\n]+)\]\]/g)) {
-          const [destination, ...alias] = match[1].split('|');
+        const original = post.body.slice(node.position.start.offset, node.position.end.offset);
+        const offsets = textSourceOffsets(original);
+        for (const match of node.value.matchAll(/(!?)\[\[([^\[\]\n]+)\]\]/g)) {
+          // Markdown text nodes have already unescaped backslashes and entities.
+          // Check the source so escaped examples remain literal.
+          if (original.slice(offsets[match.index], offsets[match.index + match[0].length]) !== match[0]) continue;
+          const [destination, ...aliases] = match[2].split('|');
+          const embed = match[1] === '!';
+          if (embed && !imageExtension.test(destination.trim().split(/[?#]/)[0])) continue;
+          const alias = aliases.join('|');
           parts.push({ type: 'text', value: node.value.slice(cursor, match.index) });
-          parts.push({ type: 'link', url: resolve(destination.trim()), children: [{ type: 'text', value: alias.length ? alias.join('|') : destination }] });
+          parts.push(embed ? image(destination.trim(), alias) : { type: 'link', url: resolve(destination.trim()), children: [{ type: 'text', value: aliases.length ? alias : destination }] });
           cursor = match.index + match[0].length;
         }
         if (!cursor) return [node];
@@ -168,13 +240,13 @@ function rewriteReferences({ post, bySource, files, usedAssets }) {
     if (!key || typeof value !== 'string' || !value || /^(?:[a-z][a-z\d+.-]*:|\/|#|\?)/i.test(value)) return;
     const { relative, suffix } = referencePath(value, post.sourcePath);
     if (/\.md$/i.test(relative)) {
-      const target = bySource.get(relative);
+      const target = relative.startsWith('posts/') ? bySource.get(relative.slice(6)) : undefined;
       if (!target) throw new Error(`${post.sourcePath}: linked article is missing or unpublished: ${value}`);
       node.properties[key] = `/posts/${encodeURIComponent(target.slug)}${suffix}`;
     } else {
       if (!files.has(relative)) throw new Error(`${post.sourcePath}: local asset does not exist: ${value}`);
       usedAssets.add(relative);
-      node.properties[key] = `/content-assets/${relative.split('/').map(encodeURIComponent).join('/')}${suffix}`;
+      node.properties[key] = `${assetUrl(relative)}${suffix}`;
     }
     if (node.tagName === 'img') { node.properties.loading = 'lazy'; node.properties.decoding = 'async'; }
   });
@@ -209,10 +281,14 @@ function enhanceContent(toc, shiki) {
   };
 }
 
-export async function buildCatalog(rootDirectory, { sample = false, revision = null } = {}) {
+export async function buildCatalog(rootDirectory, { sample = false, revision = null, previewResolver = null } = {}) {
   const postsDirectory = path.join(rootDirectory, 'posts');
   const fileList = await walk(postsDirectory);
-  const files = new Set(fileList);
+  const imagesDirectory = path.join(rootDirectory, 'images');
+  let imageFiles = [];
+  try { await lstat(imagesDirectory); imageFiles = await walk(imagesDirectory); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const files = new Set([...fileList.map(file => `posts/${file}`), ...imageFiles.filter(file => imageExtension.test(file)).map(file => `images/${file}`)]);
   const allPosts = await Promise.all(fileList.filter(file => file.toLowerCase().endsWith('.md')).map(async source => parsePost(await readFile(path.join(postsDirectory, source), 'utf8'), source)));
   const slugs = new Set();
   for (const post of allPosts) {
@@ -227,11 +303,11 @@ export async function buildCatalog(rootDirectory, { sample = false, revision = n
   const shiki = await highlighter();
   for (const post of published) {
     const markdownTree = unified().use(remarkParse).use(remarkGfm).use(remarkMath).parse(post.body);
-    wikiLinks({ post, allPosts })()(markdownTree);
+    wikiLinks({ post, allPosts, files, usedAssets })()(markdownTree);
     const plainText = textOf(markdownTree).replace(/\s+/g, ' ').trim();
     const toc = [];
     const result = await unified().use(remarkParse).use(remarkGfm).use(remarkMath).use(doubleDollarDisplay)
-      .use(wikiLinks({ post, allPosts }))
+      .use(wikiLinks({ post, allPosts, files, usedAssets }))
       .use(remarkRehype).use(rewriteReferences({ post, bySource, files, usedAssets }))
       .use(rehypeSanitize, mathSchema).use(rehypeSlug)
       .use(enhanceContent(toc, shiki)).use(rehypeKatex, { trust: false, strict: 'error', output: 'htmlAndMathml' })
@@ -249,9 +325,13 @@ export async function buildCatalog(rootDirectory, { sample = false, revision = n
     while (folder) { folders.add(folder); folder = path.posix.dirname(folder); if (folder === '.') break; }
   }
   const summaries = published.map(post => { const { html, toc, ...summary } = articles[post.slug]; return summary; });
+  const shorts = await buildShorts(rootDirectory, { previewResolver });
+  const usedPreviews = new Set(shorts.map(short => short.preview?.image?.slice('/short-previews/'.length)).filter(Boolean));
   return {
     catalog: { posts: summaries, folders: [...folders].sort((a, b) => a.localeCompare(b, 'ko')), tags: [...new Set(summaries.flatMap(post => post.tags))].sort((a, b) => a.localeCompare(b, 'ko')), sample, revision },
-    articles, searchIndex, usedAssets: [...usedAssets], postsDirectory,
+    articles, searchIndex, shorts,
+    shortPreviewAssets: new Map([...(previewResolver?.assets || [])].filter(([filename]) => usedPreviews.has(filename))),
+    usedAssets: [...usedAssets], rootDirectory,
   };
 }
 
@@ -288,29 +368,41 @@ export async function writeContent(result, directory = projectDir) {
   const generated = path.join(directory, 'app/generated');
   const publicDirectory = path.join(directory, '.cache/public');
   const assets = path.join(publicDirectory, 'content-assets');
+  const images = path.join(publicDirectory, 'content-images');
+  const previews = path.join(publicDirectory, 'short-previews');
   await mkdir(generated, { recursive: true });
   await rm(assets, { recursive: true, force: true });
+  await rm(images, { recursive: true, force: true });
+  await rm(previews, { recursive: true, force: true });
   await mkdir(assets, { recursive: true });
   await Promise.all([
     writeFile(path.join(generated, 'catalog.json'), JSON.stringify(result.catalog)),
     writeFile(path.join(generated, 'articles.json'), JSON.stringify(result.articles)),
+    writeFile(path.join(generated, 'shorts.json'), JSON.stringify(result.shorts)),
     writeFile(path.join(publicDirectory, 'search-index.json'), JSON.stringify(result.searchIndex)),
   ]);
+  if (result.shortPreviewAssets?.size) {
+    await mkdir(previews, { recursive: true });
+    for (const [filename, bytes] of result.shortPreviewAssets) {
+      if (!/^[a-f0-9]{64}\.webp$/.test(filename)) throw new Error('Invalid short preview asset filename');
+      await writeFile(path.join(previews, filename), bytes);
+    }
+  }
   for (const asset of result.usedAssets) {
-    const destination = path.join(assets, asset);
+    const destination = path.join(publicDirectory, decodeURIComponent(assetUrl(asset)));
     await mkdir(path.dirname(destination), { recursive: true });
-    await copyFile(path.join(result.postsDirectory, asset), destination);
+    await copyFile(path.join(result.rootDirectory, asset), destination);
   }
 }
 
 async function main() {
   const source = await resolveSource();
-  const result = await buildCatalog(source.rootDirectory, source);
+  const result = await buildCatalog(source.rootDirectory, { ...source, previewResolver: createShortPreviewResolver() });
   await writeContent(result);
   const publicDirectory = path.join(projectDir, '.cache/public');
   await cp(path.join(projectDir, 'public'), publicDirectory, { recursive: true });
   await writeSiteAssets(publicDirectory, result.catalog, siteUrl);
-  console.log(`Content: ${result.catalog.posts.length} articles, ${result.catalog.folders.length} folders (${source.sample ? 'local test fixtures' : source.revision || 'local repository'})`);
+  console.log(`Content: ${result.catalog.posts.length} articles, ${result.shorts.length} short entries, ${result.catalog.folders.length} folders (${source.sample ? 'local test fixtures' : source.revision || 'local repository'})`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(error => { console.error(error.message); process.exitCode = 1; });

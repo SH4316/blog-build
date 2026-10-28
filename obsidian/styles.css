@@ -1,0 +1,31 @@
+.soohyuk-short-modal .soohyuk-short-intro,
+.soohyuk-short-modal .soohyuk-short-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  line-height: 1.6;
+}
+
+.soohyuk-short-modal .soohyuk-short-intro { margin: 0 0 20px; }
+.soohyuk-short-modal .soohyuk-short-hint { margin: 16px 0; }
+
+.soohyuk-short-modal .soohyuk-short-field {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 12px 0;
+  border: 0;
+}
+
+.soohyuk-short-modal .soohyuk-short-field .setting-item-info { margin: 0; }
+.soohyuk-short-modal .soohyuk-short-field .setting-item-control { width: 100%; }
+
+.soohyuk-short-modal .soohyuk-short-field :is(input, textarea) {
+  width: 100%;
+  min-width: 0;
+}
+
+.soohyuk-short-modal .soohyuk-short-field textarea { min-height: 120px; resize: vertical; line-height: 1.7; }
+.soohyuk-short-modal .soohyuk-short-error { color: var(--text-error); font-size: var(--font-ui-small); }
+.soohyuk-short-modal .soohyuk-short-error:empty { display: none; }
+.soohyuk-short-modal .soohyuk-short-actions { padding-bottom: 0; border: 0; }

@@ -11,6 +11,7 @@ export default {
     '/',
     '/folders',
     '/search',
+    '/shorts',
     '/404',
     ...catalog.posts.map((post) => prerenderPath(`/posts/${encodeURIComponent(post.slug)}`)),
     ...catalog.folders.map((folder) =>

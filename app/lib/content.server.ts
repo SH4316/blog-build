@@ -1,8 +1,10 @@
 import catalog from '../generated/catalog.json';
 import articles from '../generated/articles.json';
-import type { Article, Catalog } from './types';
+import shorts from '../generated/shorts.json';
+import type { Article, Catalog, ShortEntry } from './types';
 
 export const getCatalog = () => catalog as Catalog;
+export const getShorts = () => shorts as ShortEntry[];
 export function getArticle(slug: string) {
   const article = Object.hasOwn(articles, slug)
     ? (articles as Record<string, Article>)[slug]

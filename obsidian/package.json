@@ -1,6 +1,6 @@
 {
   "name": "soohyuk-blog-frontmatter",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -14,7 +14,8 @@
     "test": "node --test tests/*.test.mjs",
     "licenses": "node scripts/licenses.mjs --write",
     "verify:licenses": "node scripts/licenses.mjs",
-    "verify:build": "node scripts/verify-build.mjs"
+    "verify:build": "node scripts/verify-build.mjs",
+    "test:blog-compat": "node --test tests/compatibility/*.test.mjs"
   },
   "devDependencies": {
     "esbuild": "0.28.2",

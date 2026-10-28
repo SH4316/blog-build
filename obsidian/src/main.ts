@@ -1,11 +1,13 @@
 import {
-  App, getFrontMatterInfo, Modal, normalizePath, Notice, parseYaml, Plugin,
-  PluginSettingTab, Setting, stringifyYaml, TFile, TFolder,
+  getFrontMatterInfo, normalizePath, Notice, parseYaml, Plugin, stringifyYaml, TFile, TFolder,
 } from 'obsidian';
 import {
-  applyDefaults, BlogSettings, createDefaults, filenameForTitle, isPostPath,
-  loadSettings, missingFields, normalizeFolder, parseTags, uniqueSlug,
+  applyDefaults, applyShortDefaults, BlogSettings, createDefaults, createShortDefaults,
+  filenameForShort, filenameForTitle, isPostPath, isShortPath, loadSettings,
+  missingFields, missingShortFields, normalizePostFolder, normalizeShort,
+  ShortInput, SHORTS_FOLDER, uniqueSlug,
 } from './frontmatter';
+import { BlogSettingsTab, NewPostModal, NewShortModal } from './ui';
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -17,8 +19,15 @@ export default class BlogFrontmatterPlugin extends Plugin {
   private active = false;
 
   async onload(): Promise<void> {
-    this.settings = loadSettings(await this.loadData());
+    const saved: unknown = await this.loadData();
+    this.settings = loadSettings(saved);
     this.active = true;
+    if (saved && typeof saved === 'object' && 'targetFolder' in saved && typeof saved.targetFolder === 'string') {
+      try { normalizePostFolder(saved.targetFolder); }
+      catch (error) {
+        new Notice(`${message(error)} 현재 글 폴더는 ${this.settings.targetFolder}입니다. 설정을 확인하세요.`, 10000);
+      }
+    }
     this.addSettingTab(new BlogSettingsTab(this.app, this));
 
     this.addCommand({
@@ -26,7 +35,7 @@ export default class BlogFrontmatterPlugin extends Plugin {
       name: '현재 글 frontmatter 추가',
       checkCallback: checking => {
         const file = this.app.workspace.getActiveFile();
-        if (!file || !this.isPost(file)) return false;
+        if (!file || !this.isSupported(file)) return false;
         if (!checking) {
           void this.enqueue(() => this.addFrontmatter(file)).then(fields => {
             if (this.active) new Notice(fields.length ? `추가한 속성: ${fields.join(', ')}` : '이미 모든 기본 속성이 있습니다.');
@@ -40,13 +49,18 @@ export default class BlogFrontmatterPlugin extends Plugin {
       name: '새 블로그 글',
       callback: () => new NewPostModal(this.app, this).open(),
     });
+    this.addCommand({
+      id: 'new-blog-short',
+      name: '새 짧은 글',
+      callback: () => new NewShortModal(this.app, this).open(),
+    });
 
     this.app.workspace.onLayoutReady(() => {
       if (!this.active) return;
       this.registerEvent(this.app.vault.on('create', file => {
-        if (!this.active || !this.settings.autoAdd || !(file instanceof TFile) || !this.isPost(file)) return;
+        if (!this.active || !this.settings.autoAdd || !(file instanceof TFile) || !this.isSupported(file)) return;
         void this.enqueue(async () => {
-          if (this.active && this.settings.autoAdd && this.isPost(file)) await this.addFrontmatter(file);
+          if (this.active && this.settings.autoAdd && this.isSupported(file)) await this.addFrontmatter(file);
         }).catch(error => this.showError(error));
       }));
     });
@@ -58,6 +72,10 @@ export default class BlogFrontmatterPlugin extends Plugin {
 
   private isPost(file: TFile): boolean {
     return isPostPath(file.path, this.settings.targetFolder);
+  }
+
+  private isSupported(file: TFile): boolean {
+    return isShortPath(file.path) || this.isPost(file);
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -98,8 +116,18 @@ export default class BlogFrontmatterPlugin extends Plugin {
   }
 
   private async addFrontmatter(file: TFile): Promise<string[]> {
-    if (!this.active || !this.isPost(file)) return [];
+    if (!this.active || !this.isSupported(file)) return [];
     const current = await this.readFrontmatter(file);
+    if (isShortPath(file.path)) {
+      if (!missingShortFields(current).length) return [];
+      const defaults = createShortDefaults(this.settings);
+      if (!this.active || !isShortPath(file.path)) return [];
+      let added: string[] = [];
+      await this.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
+        added = applyShortDefaults(frontmatter, defaults);
+      });
+      return added;
+    }
     const missing = missingFields(current);
     if (!missing.length) return [];
     const slug = missing.includes('slug') ? uniqueSlug(file.basename, await this.usedSlugs(file)) : '';
@@ -114,7 +142,9 @@ export default class BlogFrontmatterPlugin extends Plugin {
 
   async updateSettings(changes: Partial<BlogSettings>): Promise<void> {
     const previous = this.settings;
-    this.settings = { ...previous, ...changes };
+    const next = { ...previous, ...changes };
+    next.targetFolder = normalizePostFolder(next.targetFolder);
+    this.settings = next;
     try { await this.saveData(this.settings); }
     catch (error) {
       this.settings = previous;
@@ -127,103 +157,53 @@ export default class BlogFrontmatterPlugin extends Plugin {
       if (!this.active) return;
       const title = titleInput.trim().normalize('NFC');
       if (!title) throw new Error('제목을 입력하세요.');
-      const folder = this.settings.targetFolder;
+      const folder = normalizePostFolder(this.settings.targetFolder);
       const path = normalizePath(`${folder}/${filenameForTitle(title)}`);
       if (this.app.vault.getAbstractFileByPath(path)) throw new Error(`같은 파일이 있습니다: ${path}`);
       const slug = uniqueSlug(title, await this.usedSlugs());
       const defaults = createDefaults(title, slug, this.settings);
       if (!this.active) return;
-      let parent = '';
-      for (const part of folder.split('/')) {
-        parent = parent ? `${parent}/${part}` : part;
-        const existing = this.app.vault.getAbstractFileByPath(parent);
-        if (existing && !(existing instanceof TFolder)) throw new Error(`폴더 위치에 파일이 있습니다: ${parent}`);
-        if (!existing) await this.app.vault.createFolder(parent);
-      }
+      await this.ensureFolder(folder);
+      if (!this.active) return;
       const file = await this.app.vault.create(path, `---\n${stringifyYaml(defaults)}---\n\n`);
       await this.app.workspace.getLeaf(false).openFile(file);
     });
   }
-}
 
-class BlogSettingsTab extends PluginSettingTab {
-  constructor(app: App, private readonly blog: BlogFrontmatterPlugin) {
-    super(app, blog);
-  }
-
-  display(): void {
-    const { containerEl } = this;
-    containerEl.empty();
-
-    const folder = new Setting(containerEl).setName('글 폴더').setDesc('보관함 기준 경로. 하위 폴더도 포함합니다.');
-    folder.addText(text => text.setValue(this.blog.settings.targetFolder).onChange(async value => {
-      try {
-        const targetFolder = normalizeFolder(value);
-        const existing = this.app.vault.getAbstractFileByPath(targetFolder);
-        if (existing && !(existing instanceof TFolder)) throw new Error('같은 경로에 파일이 있습니다.');
-        await this.blog.updateSettings({ targetFolder: normalizePath(targetFolder) });
-        text.inputEl.removeAttribute('aria-invalid');
-        folder.setDesc('보관함 기준 경로. 하위 폴더도 포함합니다.');
-      } catch (error) {
-        text.inputEl.setAttribute('aria-invalid', 'true');
-        folder.setDesc(`${message(error)} 기존 설정을 유지합니다.`);
+  createShort(input: ShortInput): Promise<void> {
+    return this.enqueue(async () => {
+      if (!this.active) return;
+      const value = normalizeShort(input);
+      const date = new Date();
+      const { date: timestamp, ...defaults } = createShortDefaults(this.settings, date);
+      const frontmatter = { ...defaults, ...(value.link ? { link: value.link } : {}), ...(value.linkTitle ? { linkTitle: value.linkTitle } : {}) };
+      const body = value.body;
+      const content = `---\ndate: ${JSON.stringify(timestamp)}\n${stringifyYaml(frontmatter)}---\n\n${body}${body.endsWith('\n') ? '' : '\n'}`;
+      await this.ensureFolder(SHORTS_FOLDER);
+      for (let suffix = 1; this.active; suffix++) {
+        const path = normalizePath(`${SHORTS_FOLDER}/${filenameForShort(date, suffix)}`);
+        if (this.app.vault.getAbstractFileByPath(path)) continue;
+        let file: TFile;
+        try { file = await this.app.vault.create(path, content); }
+        catch (error) {
+          // A different vault writer may have claimed the same timestamp after the check.
+          if (this.app.vault.getAbstractFileByPath(path)) continue;
+          throw error;
+        }
+        if (this.active) await this.app.workspace.getLeaf(false).openFile(file);
+        return;
       }
-    }));
-
-    const tags = new Setting(containerEl).setName('기본 태그').setDesc('쉼표로 구분합니다. 비워 두면 빈 목록을 추가합니다.');
-    tags.addText(text => text.setValue(this.blog.settings.defaultTags.join(', ')).onChange(async value => {
-      try {
-        await this.blog.updateSettings({ defaultTags: parseTags(value) });
-        text.inputEl.removeAttribute('aria-invalid');
-        tags.setDesc('쉼표로 구분합니다. 비워 두면 빈 목록을 추가합니다.');
-      } catch (error) {
-        text.inputEl.setAttribute('aria-invalid', 'true');
-        tags.setDesc(`${message(error)} 기존 설정을 유지합니다.`);
-      }
-    }));
-
-    new Setting(containerEl).setName('새 글에 자동 추가').addToggle(toggle => toggle
-      .setValue(this.blog.settings.autoAdd).onChange(async autoAdd => {
-        try { await this.blog.updateSettings({ autoAdd }); }
-        catch { toggle.setValue(this.blog.settings.autoAdd); new Notice('설정을 저장하지 못했습니다.'); }
-      }));
-    new Setting(containerEl).setName('기본 초안 상태').setDesc('켜면 새 글에 draft: true를 추가합니다.').addToggle(toggle => toggle
-      .setValue(this.blog.settings.draft).onChange(async draft => {
-        try { await this.blog.updateSettings({ draft }); }
-        catch { toggle.setValue(this.blog.settings.draft); new Notice('설정을 저장하지 못했습니다.'); }
-      }));
-  }
-}
-
-class NewPostModal extends Modal {
-  constructor(app: App, private readonly blog: BlogFrontmatterPlugin) {
-    super(app);
-  }
-
-  onOpen(): void {
-    this.contentEl.createEl('h2', { text: '새 블로그 글' });
-    let title = '';
-    let submitting = false;
-    const errorEl = this.contentEl.createEl('p', { attr: { role: 'alert' } });
-    const input = new Setting(this.contentEl).setName('제목');
-    const submit = async (): Promise<void> => {
-      if (submitting) return;
-      submitting = true;
-      try { await this.blog.createPost(title); this.close(); }
-      catch (error) { errorEl.setText(message(error)); }
-      finally { submitting = false; }
-    };
-    input.addText(text => {
-      text.setPlaceholder('글 제목').onChange(value => { title = value; });
-      text.inputEl.addEventListener('keydown', event => {
-        if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); void submit(); }
-      });
-      text.inputEl.focus();
     });
-    new Setting(this.contentEl).addButton(button => button.setButtonText('만들기').setCta().onClick(submit));
   }
 
-  onClose(): void {
-    this.contentEl.empty();
+  private async ensureFolder(folder: string): Promise<void> {
+    let parent = '';
+    for (const part of folder.split('/')) {
+      if (!this.active) return;
+      parent = parent ? `${parent}/${part}` : part;
+      const existing = this.app.vault.getAbstractFileByPath(parent);
+      if (existing && !(existing instanceof TFolder)) throw new Error(`폴더 위치에 파일이 있습니다: ${parent}`);
+      if (!existing) await this.app.vault.createFolder(parent);
+    }
   }
 }

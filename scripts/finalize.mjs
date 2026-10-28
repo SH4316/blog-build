@@ -34,4 +34,4 @@ await flatten(output);
 await rm(path.join(output, '__spa-fallback.html'), { force: true });
 const preview = Boolean(process.env.CF_PAGES && process.env.CF_PAGES_BRANCH !== 'main');
 await writeFile(path.join(output, '_headers'), `/*\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: strict-origin-when-cross-origin\n${preview ? '  X-Robots-Tag: noindex, nofollow\n' : ''}`);
-console.log(`Static output: ${2 + catalog.posts.length + catalog.folders.length + catalog.tags.length} indexable pages, 404.html, sitemap, search, and OG image.`);
+console.log(`Static output: ${3 + catalog.posts.length + catalog.folders.length + catalog.tags.length} indexable pages, 404.html, sitemap, search, and OG image.`);

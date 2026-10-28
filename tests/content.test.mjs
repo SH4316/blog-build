@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rename, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rename, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { buildCatalog, parsePost, projectDir, repositoryUrl, resolveSource, writeContent } from '../scripts/content.mjs';
@@ -33,7 +33,7 @@ test('samples render code, math, nested folders, links, images, and Unicode whil
   assert.match(result.articles['git-worktree'].html, /href="\/posts\/%EA%B8%B0/);
   assert.match(result.articles['http-cache'].html, /src="\/content-assets\/web\/images\/cache-flow.svg"/);
   assert.match(result.articles['http-cache'].html, /loading="lazy"/);
-  assert.deepEqual(result.usedAssets, ['web/images/cache-flow.svg']);
+  assert.deepEqual(result.usedAssets, ['posts/web/images/cache-flow.svg']);
   assert.ok(result.articles['http-cache'].toc.some(item => item.level === 3));
   assert.equal(result.catalog.sample, true);
 });
@@ -181,6 +181,130 @@ test('only referenced assets are copied and obsolete assets are removed', async 
   assert.equal(await readFile(path.join(output, '.cache/public/content-assets/images/used.svg'), 'utf8'), '<svg/>');
   await assert.rejects(readFile(path.join(output, '.cache/public/content-assets/images/unused.svg')), /ENOENT/);
   await assert.rejects(readFile(path.join(output, '.cache/public/content-assets/old.png')), /ENOENT/);
+});
+
+test('Obsidian images resolve root attachments with spaces and Unicode, sizes, aliases, and explicit paths', async t => {
+  const filename = 'Pasted image 20261028132609.png';
+  const root = await fixture(t, {
+    'AI/Artificial Analysis Inteligence Index v5 발표.md': article('announcement', `![[${filename}]]\n\n![[images/한글 그림.svg|그림 설명]]\n\n![[posts/AI/local.webp|300x200]]\n\n![[local.webp|120]]\n\n![일반 이미지](<../../images/${filename}?version=1#image>)`),
+    'AI/local.webp': 'local image',
+  });
+  await mkdir(path.join(root, 'images'), { recursive: true });
+  await writeFile(path.join(root, 'images', filename), Buffer.from([137, 80, 78, 71, 0, 1, 2]));
+  await writeFile(path.join(root, 'images/한글 그림.svg'), '<svg/>');
+  const result = await buildCatalog(root);
+  const { html } = result.articles.announcement;
+  assert.equal((html.match(/src="\/content-images\/Pasted%20image%2020261028132609.png/g) || []).length, 2);
+  assert.ok(html.includes(`src="/content-images/${encodeURIComponent('한글 그림.svg')}" alt="그림 설명"`));
+  assert.match(html, /src="\/content-assets\/AI\/local.webp" alt="local.webp" width="300" height="200"/);
+  assert.match(html, /src="\/content-assets\/AI\/local.webp" alt="local.webp" width="120"/);
+  assert.match(html, /version=1#image/);
+  assert.equal((html.match(/loading="lazy" decoding="async"/g) || []).length, 5);
+  assert.doesNotMatch(html, /!\[\[/);
+  const output = await mkdtemp(path.join(tmpdir(), 'soohyuk-output-'));
+  t.after(() => rm(output, { recursive: true, force: true }));
+  await writeContent(result, output);
+  assert.deepEqual(await readFile(path.join(output, '.cache/public/content-images', filename)), await readFile(path.join(root, 'images', filename)));
+});
+
+test('wiki image lookup prefers siblings and fails on missing or ambiguous supported images with source context', async t => {
+  const root = await fixture(t, {
+    'one/start.md': article('start', '![[shared.png]]'),
+    'one/shared.png': 'near',
+    'two/shared.png': 'far',
+  });
+  assert.match((await buildCatalog(root)).articles.start.html, /src="\/content-assets\/one\/shared.png"/);
+  await writeFile(path.join(root, 'posts/start.md'), article('root-start', '![[shared.png]]'));
+  await assert.rejects(buildCatalog(root), /start.md: ambiguous wiki image: shared.png/);
+  await writeFile(path.join(root, 'posts/start.md'), article('root-start', '![[missing.JPEG]]'));
+  await assert.rejects(buildCatalog(root), /start.md: local image does not exist: missing.JPEG/);
+  await mkdir(path.join(root, 'images'), { recursive: true });
+  await writeFile(path.join(root, 'images/shared.png'), 'root image');
+  await rm(path.join(root, 'posts/two/shared.png'));
+  await writeFile(path.join(root, 'posts/start.md'), article('root-start', '![[shared.png]]'));
+  await assert.rejects(buildCatalog(root), /start.md: ambiguous wiki image: shared.png/);
+});
+
+test('root images and posts attachments use distinct URLs and only published references are copied', async t => {
+  const root = await fixture(t, {
+    'start.md': article('start', '![[posts/same.png]]\n\n![[images/same.png]]'),
+    'same.png': 'posts image',
+    'draft.md': article('draft', '![[images/private.png]]', 'draft: true'),
+  });
+  await mkdir(path.join(root, 'images'), { recursive: true });
+  for (const name of ['same.png', 'private.png', 'unused.png', 'config.json']) await writeFile(path.join(root, 'images', name), name);
+  await writeFile(path.join(root, 'secret.png'), 'outside allowed roots');
+  const result = await buildCatalog(root);
+  assert.match(result.articles.start.html, /src="\/content-assets\/same.png"/);
+  assert.match(result.articles.start.html, /src="\/content-images\/same.png"/);
+  assert.deepEqual(result.usedAssets, ['posts/same.png', 'images/same.png']);
+  const output = await mkdtemp(path.join(tmpdir(), 'soohyuk-output-'));
+  t.after(() => rm(output, { recursive: true, force: true }));
+  await mkdir(path.join(output, '.cache/public/content-images'), { recursive: true });
+  await writeFile(path.join(output, '.cache/public/content-images/old.png'), 'old');
+  await writeContent(result, output);
+  assert.equal(await readFile(path.join(output, '.cache/public/content-assets/same.png'), 'utf8'), 'posts image');
+  assert.equal(await readFile(path.join(output, '.cache/public/content-images/same.png'), 'utf8'), 'same.png');
+  for (const name of ['private.png', 'unused.png', 'config.json', 'secret.png', 'old.png']) {
+    await assert.rejects(readFile(path.join(output, '.cache/public/content-images', name)), { code: 'ENOENT' });
+  }
+});
+
+test('image examples in code, math, escaped syntax, note embeds, and existing links remain literal', async t => {
+  const root = await fixture(t, {
+    'start.md': article('start', '`![[missing.png]]`\n\n```text\n![[missing.png]]\n```\n\n$![[x.png]]$\n\n\\![[missing.png]]\n\n!\\[[missing.png]]\n\n\\[[missing]]\n\n![[missing]]\n\n[See ![[missing.png]]](https://example.com)\n\n[See ![[missing.png]]][external]\n\n[external]: https://example.com'),
+  });
+  const result = await buildCatalog(root);
+  assert.doesNotMatch(result.articles.start.html, /<img/);
+  assert.match(result.articles.start.html, /<code>!\[\[missing.png\]\]<\/code>/);
+  assert.match(result.articles.start.html, /!\[\[missing\]\]/);
+  assert.equal((result.articles.start.html.match(/href="https:\/\/example.com">See !\[\[missing.png\]\]/g) || []).length, 2);
+  assert.deepEqual(result.usedAssets, []);
+});
+
+test('escaped wiki examples retain their positions beside identical real images and article links', async t => {
+  const root = await fixture(t, {
+    'start.md': article('start', '\\!\\[\\[picture.png\\]\\] ![[picture.png]] &#33;[[picture.png]] ![[picture.png]]\n\n\\[\\[target\\]\\] [[target]] &#91;&#91;target]] [[target]]'),
+    'target.md': article('target'),
+    'picture.png': 'image',
+  });
+  const { html } = (await buildCatalog(root)).articles.start;
+  assert.equal((html.match(/<img /g) || []).length, 2);
+  assert.equal((html.match(/!\[\[picture.png\]\]/g) || []).length, 2);
+  assert.match(html, /<p>!\[\[picture.png\]\] <img/);
+  assert.equal((html.match(/href="\/posts\/target"/g) || []).length, 2);
+  assert.match(html, /<p>\[\[target\]\] <a href="\/posts\/target"/);
+});
+
+test('wiki and Markdown images cannot traverse outside allowed roots or access hidden files', async t => {
+  for (const body of ['![[../../secret.png]]', '![[images/../../secret.png]]', '![[..%2F..%2Fsecret.png]]', '![[images/.private.png]]', '![[.private/secret.png]]', '![[images/back%5Cslash.png]]', '![x](../../secret.png)', '![x](../images/.private.png)', '![[secret.png]]', '![x](../images/config.json)']) {
+    const root = await fixture(t, { 'start.md': article('start', body), '.private/secret.png': 'hidden' });
+    await mkdir(path.join(root, 'images'), { recursive: true });
+    await writeFile(path.join(root, 'images/.private.png'), 'hidden');
+    await writeFile(path.join(root, 'images/config.json'), '{}');
+    await writeFile(path.join(root, 'secret.png'), 'repository root secret');
+    await assert.rejects(buildCatalog(root), /start.md:/, body);
+  }
+});
+
+test('symlinked attachment directories and files fail without following their targets', async t => {
+  for (const kind of ['images-root', 'posts-root', 'images-file', 'posts-file', 'images-directory']) {
+    const root = await fixture(t, { 'start.md': article('start') });
+    const outside = await mkdtemp(path.join(tmpdir(), 'soohyuk-outside-'));
+    t.after(() => rm(outside, { recursive: true, force: true }));
+    await writeFile(path.join(outside, 'target.png'), 'outside');
+    if (kind === 'images-root') await symlink(outside, path.join(root, 'images'));
+    if (kind === 'posts-root') {
+      await rm(path.join(root, 'posts'), { recursive: true });
+      await symlink(outside, path.join(root, 'posts'));
+    }
+    if (kind === 'posts-file') await symlink(path.join(outside, 'target.png'), path.join(root, 'posts/link.png'));
+    if (kind.startsWith('images-') && kind !== 'images-root') {
+      await mkdir(path.join(root, 'images'));
+      await symlink(kind === 'images-file' ? path.join(outside, 'target.png') : outside, path.join(root, 'images/link.png'));
+    }
+    await assert.rejects(buildCatalog(root), /Symbolic links are not supported/);
+  }
 });
 
 test('production cannot fall back to examples and GitHub sources are restricted to public repository identifiers', async () => {

@@ -29,3 +29,17 @@ export interface Catalog {
 export interface SearchEntry extends PostSummary {
   text: string;
 }
+
+export interface ShortEntry {
+  id: string;
+  date: string;
+  html: string;
+  link: string | null;
+  linkTitle: string | null;
+  linkHost: string | null;
+  preview: {
+    title: string | null;
+    description: string | null;
+    image: string | null;
+  } | null;
+}

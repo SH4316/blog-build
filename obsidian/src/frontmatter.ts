@@ -12,6 +12,20 @@ export const DEFAULT_SETTINGS: BlogSettings = {
   draft: true,
 };
 
+export const SHORTS_FOLDER = 'shorts';
+export const SHORT_FIELDS = ['date', 'draft'] as const;
+
+export interface ShortInput {
+  body: string;
+  link?: string;
+  linkTitle?: string;
+}
+
+export interface ShortFrontmatterDefaults {
+  date: string;
+  draft: boolean;
+}
+
 export const DEFAULT_FIELDS = ['title', 'slug', 'date', 'description', 'tags', 'draft'] as const;
 export interface FrontmatterDefaults {
   title: string;
@@ -31,8 +45,20 @@ export function normalizeFolder(input: string): string {
   return folder;
 }
 
+export function normalizePostFolder(input: string): string {
+  const folder = normalizeFolder(input);
+  if (folder.toLowerCase() === SHORTS_FOLDER || folder.toLowerCase().startsWith(`${SHORTS_FOLDER}/`)) {
+    throw new Error('글 폴더는 짧은 글 전용 폴더 shorts 또는 그 하위 폴더와 겹칠 수 없습니다. posts 등 다른 경로를 입력하세요.');
+  }
+  return folder;
+}
+
+export function isShortPath(path: string): boolean {
+  return path.startsWith(`${SHORTS_FOLDER}/`) && /\.md$/i.test(path);
+}
+
 export function isPostPath(path: string, folder: string): boolean {
-  return path.startsWith(`${folder}/`) && /\.md$/i.test(path);
+  return !isShortPath(path) && path.startsWith(`${folder}/`) && /\.md$/i.test(path);
 }
 
 export function validateTags(tags: unknown): string[] {
@@ -53,7 +79,7 @@ export function loadSettings(input: unknown): BlogSettings {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return settings;
   const data = input as Record<string, unknown>;
   if (typeof data.targetFolder === 'string') {
-    try { settings.targetFolder = normalizeFolder(data.targetFolder); } catch { /* Retain the safe default. */ }
+    try { settings.targetFolder = normalizePostFolder(data.targetFolder); } catch { /* Retain the safe default. */ }
   }
   if (data.defaultTags !== undefined) {
     try { settings.defaultTags = validateTags(data.defaultTags); } catch { /* Retain the safe default. */ }
@@ -107,4 +133,43 @@ export function filenameForTitle(title: string): string {
   const stem = title.normalize('NFC').replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[. ]+$/g, '').trim();
   if (!stem || ['.', '..'].includes(stem)) throw new Error('파일명으로 사용할 수 있는 제목을 입력하세요.');
   return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(stem) ? `_${stem}.md` : `${stem}.md`;
+}
+
+export function createShortDefaults(settings: BlogSettings, date: Date = new Date()): ShortFrontmatterDefaults {
+  return { date: date.toISOString(), draft: settings.draft };
+}
+
+export function missingShortFields(frontmatter: Record<string, unknown>): (keyof ShortFrontmatterDefaults)[] {
+  return SHORT_FIELDS.filter(field => !Object.prototype.hasOwnProperty.call(frontmatter, field));
+}
+
+export function applyShortDefaults(frontmatter: Record<string, unknown>, defaults: ShortFrontmatterDefaults): string[] {
+  const fields = missingShortFields(frontmatter);
+  for (const field of fields) frontmatter[field] = defaults[field];
+  return fields;
+}
+
+export function normalizeShort(input: ShortInput): ShortInput {
+  if (typeof input.body !== 'string') throw new Error('짧은 글 본문은 텍스트여야 합니다.');
+  const body = input.body;
+  const link = input.link?.trim() || '';
+  const linkTitle = input.linkTitle?.trim() || '';
+  if (!body.trim() && !link) throw new Error('본문 또는 링크를 입력하세요.');
+  if (linkTitle && !link) throw new Error('링크 제목을 입력하려면 링크도 입력하세요.');
+  if (!link) return { body };
+  if (!/^https?:\/\//i.test(link) || /[\s\u0000-\u001f\u007f]/.test(link)) {
+    throw new Error('링크는 공백이 없는 http:// 또는 https:// 전체 주소로 입력하세요.');
+  }
+  let url: URL;
+  try { url = new URL(link); }
+  catch { throw new Error('올바른 HTTP(S) 링크 주소를 입력하세요.'); }
+  if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password) {
+    throw new Error('링크는 사용자 이름과 비밀번호가 없는 HTTP(S) 전체 주소여야 합니다.');
+  }
+  return { body, link: url.href, ...(linkTitle ? { linkTitle } : {}) };
+}
+
+export function filenameForShort(date: Date, suffix = 1): string {
+  const stem = date.toISOString().replace(/[:.]/g, '-');
+  return `${stem}${suffix > 1 ? `-${suffix}` : ''}.md`;
 }

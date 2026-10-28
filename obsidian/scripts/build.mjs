@@ -8,7 +8,7 @@ const output = path.join(root, 'dist', manifest.id);
 const notices = await verifyLicenses();
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
-for (const relative of ['manifest.json', 'LICENSE', ...notices]) {
+for (const relative of ['manifest.json', 'styles.css', 'LICENSE', ...notices]) {
   const destination = path.join(output, relative);
   await mkdir(path.dirname(destination), { recursive: true });
   await copyFile(path.join(root, relative), destination);

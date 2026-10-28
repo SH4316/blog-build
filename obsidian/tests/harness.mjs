@@ -17,7 +17,7 @@ export function note(fields, body = '\n본문입니다.\n') {
   return `---\n${stringify(fields)}---\n${body}`;
 }
 
-export async function harness(settings, initial = {}) {
+export async function harness(settings, initial = {}, options = {}) {
   const files = new Map();
   const contents = new Map();
   const listeners = new Map();
@@ -26,6 +26,7 @@ export async function harness(settings, initial = {}) {
   const writes = [];
   const controls = [];
   const opened = [];
+  const modals = [];
 
   class TFile {
     constructor(path) { this.path = path; }
@@ -35,30 +36,59 @@ export async function harness(settings, initial = {}) {
   class TFolder { constructor(path) { this.path = path; } }
   class Element {
     attrs = new Map();
-    empty() {}
-    createEl() { return new Element(); }
+    children = [];
+    classes = new Set();
+    listeners = new Map();
+    empty() { this.children = []; }
+    createEl(tag, options = {}) {
+      const element = new Element();
+      element.tag = tag;
+      element.text = options.text || '';
+      if (options.cls) element.addClass(options.cls);
+      for (const [name, value] of Object.entries(options.attr || {})) element.setAttribute(name, value);
+      this.children.push(element);
+      return element;
+    }
+    addClass(name) { this.classes.add(name); }
     setText(text) { this.text = text; }
     setAttribute(name, value) { this.attrs.set(name, value); }
     removeAttribute(name) { this.attrs.delete(name); }
-    addEventListener() {}
-    focus() {}
+    addEventListener(event, callback) {
+      if (!this.listeners.has(event)) this.listeners.set(event, []);
+      this.listeners.get(event).push(callback);
+    }
+    dispatch(event, details = {}) {
+      const input = { preventDefault() { this.defaultPrevented = true; }, ...details };
+      for (const callback of this.listeners.get(event) || []) callback(input);
+      return input;
+    }
+    focus() { this.focused = true; }
   }
   class Control {
     inputEl = new Element();
     setValue(value) { this.value = value; return this; }
     setPlaceholder() { return this; }
     onChange(callback) { this.change = callback; return this; }
-    setButtonText() { return this; }
+    setButtonText(text) { this.buttonText = text; return this; }
+    setDisabled(disabled) { this.disabled = disabled; return this; }
     setCta() { return this; }
     onClick(callback) { this.click = callback; return this; }
   }
   class Setting {
-    constructor() { controls.push(this); }
+    constructor(container) { this.container = container; controls.push(this); }
+    setClass(name) { this.className = name; return this; }
     setName(name) { this.name = name; return this; }
     setDesc(description) { this.description = description; return this; }
     addText(callback) { this.text = new Control(); callback(this.text); return this; }
+    addTextArea(callback) { this.textArea = new Control(); callback(this.textArea); return this; }
     addToggle(callback) { this.toggle = new Control(); callback(this.toggle); return this; }
-    addButton(callback) { this.button = new Control(); callback(this.button); return this; }
+    addButton(callback) {
+      this.button = new Control();
+      this.buttons ||= [];
+      this.buttons.push(this.button);
+      callback(this.button);
+      return this;
+    }
   }
   class Plugin {
     constructor(app) { this.app = app; this.commands = []; this.tabs = []; this.events = []; }
@@ -72,9 +102,9 @@ export async function harness(settings, initial = {}) {
     constructor(app) { this.app = app; this.containerEl = new Element(); }
   }
   class Modal {
-    constructor(app) { this.app = app; this.contentEl = new Element(); }
-    open() { this.onOpen(); }
-    close() { this.onClose(); }
+    constructor(app) { this.app = app; this.contentEl = new Element(); modals.push(this); }
+    open() { this.isOpen = true; this.onOpen(); }
+    close() { this.isOpen = false; this.onClose(); }
   }
   class Notice { constructor(text) { notices.push(text); } }
   const vault = {
@@ -145,14 +175,18 @@ export async function harness(settings, initial = {}) {
     stringifyYaml: stringify,
     normalizePath: path => path.replace(/\\/g, '/').replace(/\/{2,}/g, '/'),
   };
-  vm.runInNewContext(source, { module, exports: module.exports, require: name => {
+  const ClockDate = options.now ? class extends Date {
+    constructor(...args) { super(...(args.length ? args : [options.now])); }
+    static now() { return new Date(options.now).getTime(); }
+  } : Date;
+  vm.runInNewContext(source, { module, exports: module.exports, URL, Date: ClockDate, require: name => {
     if (name !== 'obsidian') throw new Error(`Unexpected runtime dependency: ${name}`);
     return obsidian;
   } });
   const plugin = new module.exports.default(app);
   await plugin.onload();
   return {
-    plugin, app, vault, contents, files, notices, writes, controls, opened,
+    plugin, app, vault, contents, files, notices, writes, controls, opened, modals,
     ready() { for (const callback of ready) callback(); },
     async drain() {
       for (let attempt = 0; attempt < 20; attempt++) {

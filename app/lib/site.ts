@@ -14,6 +14,21 @@ export const formatDate = (date: string) =>
     day: '2-digit',
     timeZone: 'UTC',
   }).format(new Date(`${date}T00:00:00Z`));
+export function formatShortDate(date: string) {
+  const hasTime = date.includes('T');
+  const value = new Date(hasTime ? date : `${date}T00:00:00Z`);
+  return {
+    label: new Intl.DateTimeFormat('ko-KR', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      ...(hasTime ? { hour: '2-digit' as const, minute: '2-digit' as const, hourCycle: 'h23' as const } : {}),
+      timeZone: 'Asia/Seoul',
+    }).format(value),
+    title: new Intl.DateTimeFormat('ko-KR', {
+      dateStyle: 'full', ...(hasTime ? { timeStyle: 'short' as const } : {}), timeZone: 'Asia/Seoul',
+    }).format(value) + (hasTime ? ' (KST)' : ''),
+    dateTime: date,
+  };
+}
 export function pageMeta(
   title: string,
   description: string,

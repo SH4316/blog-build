@@ -6,6 +6,7 @@ export default [
   route('folders/*', 'routes/folder.tsx'),
   route('tags/:tag', 'routes/tag.tsx'),
   route('search', 'routes/search.tsx'),
+  route('shorts', 'routes/shorts.tsx'),
   route('404', 'routes/not-found.tsx'),
   route('*', 'routes/missing.tsx'),
 ] satisfies RouteConfig;

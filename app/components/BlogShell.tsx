@@ -219,6 +219,13 @@ function Sidebar({
           <Icon name="home" size={17} />
           최근 글
         </NavLink>
+        <NavLink
+          to="/shorts"
+          className={({ isActive }) => `${styles.topLink} ${isActive ? styles.activeTopLink : ''}`}
+        >
+          <Icon name="note" size={17} />
+          짧은 글
+        </NavLink>
         <div className={styles.navHeading}>
           <Link to="/folders">폴더</Link>
           <span>{catalog.folders.length}</span>

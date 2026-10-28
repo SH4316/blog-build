@@ -4,7 +4,7 @@ import sharp from 'sharp';
 
 export async function writeSiteAssets(directory, catalog, siteUrl) {
   const xml = value => String(value).replace(/[<>&"']/g, char => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[char]);
-  const paths = ['/', '/folders', ...catalog.posts.map(post => `/posts/${encodeURIComponent(post.slug)}`), ...catalog.folders.map(folder => `/folders/${folder.split('/').map(encodeURIComponent).join('/')}`), ...catalog.tags.map(tag => `/tags/${encodeURIComponent(tag)}`)];
+  const paths = ['/', '/folders', '/shorts', ...catalog.posts.map(post => `/posts/${encodeURIComponent(post.slug)}`), ...catalog.folders.map(folder => `/folders/${folder.split('/').map(encodeURIComponent).join('/')}`), ...catalog.tags.map(tag => `/tags/${encodeURIComponent(tag)}`)];
   const sitemap = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${paths.map(route => {
     const post = catalog.posts.find(post => route === `/posts/${encodeURIComponent(post.slug)}`);
     return `<url><loc>${xml(siteUrl + (route === '/' ? '' : route))}</loc>${post ? `<lastmod>${xml(post.updated || post.date)}</lastmod>` : ''}</url>`;

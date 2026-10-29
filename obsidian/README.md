@@ -4,9 +4,15 @@
 
 ## 설치
 
-**별도 글 저장소의 루트**를 Obsidian 보관함으로 엽니다. 루트의 `posts/`에는 블로그 글을, `shorts/`에는 짧은 글을 작성하는 [블로그 콘텐츠 형식](../examples/content-repo/README.md)에 맞춰져 있습니다.
+이 플러그인은 커뮤니티 플러그인 목록에서 검색해 설치하는 방식이 아니라, 직접 빌드한 파일을 보관함에 복사해 설치합니다. **Obsidian 1.5.13 이상**과 빌드할 컴퓨터의 **Node.js 24 이상 및 npm**이 필요합니다. 모바일에서도 사용할 수 있지만, 빌드는 컴퓨터에서 한 뒤 결과물을 모바일 보관함으로 옮겨야 합니다.
 
-프로젝트 루트에서 Node.js 24 이상과 npm으로 빌드합니다. 블로그 웹앱과 의존성 설치·빌드는 분리되어 있습니다.
+### 1. 글 보관함 준비
+
+**별도 글 저장소의 루트**를 Obsidian 보관함으로 엽니다. 이 플러그인은 보관함 루트의 `posts/`에 블로그 글을, `shorts/`에 짧은 글을 작성하는 [블로그 콘텐츠 형식](../examples/content-repo/README.md)에 맞춰져 있습니다. 없는 폴더는 글을 만들 때 생성됩니다.
+
+### 2. 플러그인 빌드
+
+터미널에서 이 프로젝트의 루트로 이동한 다음 실행합니다. 블로그 웹앱과 의존성 설치·빌드는 분리되어 있습니다.
 
 ```bash
 cd blog/obsidian
@@ -15,7 +21,9 @@ npm test
 npm run build
 ```
 
-생성된 **`dist/soohyuk-blog-frontmatter/` 폴더 전체**를 글 보관함의 `.obsidian/plugins/` 아래에 복사합니다. `main.js`, `manifest.json`, `styles.css`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `THIRD_PARTY_NOTICES.json`, `licenses/`를 함께 보관하세요.
+### 3. 보관함에 복사
+
+생성된 **`blog/obsidian/dist/soohyuk-blog-frontmatter/` 폴더 전체**를 글 보관함의 `.obsidian/plugins/` 아래에 복사합니다. `plugins/`가 없으면 만듭니다. `main.js`, `manifest.json`, `styles.css`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `THIRD_PARTY_NOTICES.json`, `licenses/`를 함께 보관하세요.
 
 ```text
 글 저장소/
@@ -32,7 +40,22 @@ npm run build
   images/
 ```
 
-Obsidian을 다시 열고 **설정 → 커뮤니티 플러그인**에서 제한 모드를 해제한 다음 **Soohyuk Blog Frontmatter**를 켭니다. 업데이트할 때도 빌드한 폴더 전체를 복사하고 플러그인을 다시 켭니다. 공개 글 저장소의 `.gitignore`에는 `.obsidian/`를 추가하세요.
+`.obsidian`은 숨김 폴더이므로 파일 관리자에서 숨김 파일 표시를 켜야 할 수 있습니다. Obsidian에서 설정 폴더 이름을 변경했다면 `.obsidian` 대신 그 폴더를 사용합니다. 모바일에서는 파일 앱이나 동기화 수단을 통해 같은 경로에 복사합니다.
+
+### 4. 활성화 및 확인
+
+1. Obsidian을 다시 열고 **설정 → 커뮤니티 플러그인**으로 이동합니다.
+2. 제한 모드가 켜져 있다면 **커뮤니티 플러그인 켜기**를 선택합니다.
+3. 설치된 플러그인 목록에서 **Soohyuk Blog Frontmatter**를 켭니다.
+4. 명령 팔레트에서 **새 블로그 글** 또는 **새 짧은 글**을 실행해 파일이 생성되는지 확인합니다.
+
+목록에 나타나지 않으면 올바른 보관함에 복사했는지, `plugins/soohyuk-blog-frontmatter/` 바로 아래에 `main.js`와 `manifest.json`이 있는지 확인한 후 Obsidian을 다시 시작합니다.
+
+### 업데이트
+
+새 버전을 위와 같이 빌드하고 플러그인을 비활성화한 뒤, 빌드된 폴더의 내용을 기존 `soohyuk-blog-frontmatter/` 폴더에 덮어씁니다. 기존 폴더를 통째로 삭제하지 마세요. 플러그인 설정이 저장된 `data.json`을 유지해야 합니다. 복사 후 플러그인을 다시 활성화합니다.
+
+공개 글 저장소의 `.gitignore`에는 `.obsidian/`를 추가하세요. 이미 Git이 추적하는 파일은 `.gitignore`를 추가해도 자동으로 추적이 해제되지 않습니다.
 
 ## 사용
 

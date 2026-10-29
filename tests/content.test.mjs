@@ -99,7 +99,7 @@ test('wiki links resolve filenames, aliases, paths, and Korean heading fragments
   assert.ok(!result.searchIndex.find(item => item.slug === 'start').text.includes('[['));
 });
 
-test('wiki links prefer a sibling and reject ambiguous, missing, and unpublished targets', async t => {
+test('wiki links prefer a sibling and still reject ambiguous targets and unsupported block links', async t => {
   const files = {
     'one/start.md': article('start', '[[target]]'),
     'one/target.md': article('near'),
@@ -109,9 +109,8 @@ test('wiki links prefer a sibling and reject ambiguous, missing, and unpublished
   assert.match((await buildCatalog(root)).articles.start.html, /href="\/posts\/near"/);
   for (const [body, expected] of [
     ['[[target]]', /ambiguous wiki link/],
-    ['[[missing]]', /missing or unpublished/],
-    ['[[draft]]', /missing or unpublished/],
     ['[[one/target#^block]]', /block links are not supported/],
+    ['[[missing#^block]]', /block links are not supported/],
   ]) {
     const invalid = await fixture(t, { ...files, 'start.md': article('root-start', body), 'draft.md': article('draft', '', 'draft: true') });
     await assert.rejects(buildCatalog(invalid), expected);
@@ -126,13 +125,65 @@ test('wiki syntax in code, math, embeds, and existing links stays literal', asyn
   assert.match(html, /href="https:\/\/example.com">See \[\[missing\]\]<\/a>/);
 });
 
-test('missing articles, draft targets, missing assets, and escaping paths fail with a source filename', async t => {
-  for (const body of ['[깨진 링크](missing.md)', '![이미지](missing.png)', '[밖의 파일](../../outside.png)']) {
+test('missing wiki articles and drafts become escaped labels with one warning per source and raw target', async t => {
+  const root = await fixture(t, {
+    'notes/start.md': article('start', '[[missing]] [[missing|별칭]] [[missing|다른 별칭]] [[draft|초안 이름]] [[missing#한글 제목|소제목 별칭]] [[missing|2 < 3 & 5 > 4]] [[published|정상 링크]]'),
+    'notes/draft.md': article('draft', 'DRAFT_PRIVATE_BODY', 'draft: true'),
+    'notes/published.md': article('published', '공개 본문'),
+  });
+  const warnings = [];
+  const result = await buildCatalog(root, { onWarning: message => warnings.push(message) });
+  const html = result.articles.start.html;
+  assert.match(html, /missing 별칭 다른 별칭 초안 이름 소제목 별칭/);
+  assert.match(html, /2 (?:&#x3C;|&lt;) 3 (?:&#x26;|&amp;) 5 (?:&#x3E;|&gt;|>) 4/);
+  assert.match(html, /href="\/posts\/published">정상 링크<\/a>/);
+  assert.equal((html.match(/<a /g) || []).length, 1);
+  assert.equal(warnings.length, 3, 'Search and HTML transforms must not duplicate a warning');
+  for (const target of ['missing', 'draft', 'missing#한글 제목']) assert.ok(warnings.some(message => message.includes('notes/start.md:') && message.includes(JSON.stringify(target))));
+  assert.ok(warnings.every(message => message.includes('rendered as plain text')));
+  assert.doesNotMatch(result.searchIndex.find(post => post.slug === 'start').text, /\[\[/);
+  assert.doesNotMatch(JSON.stringify(result), /DRAFT_PRIVATE_BODY/);
+});
+
+test('missing Markdown articles keep inline labels, query/fragment context, and following valid links', async t => {
+  const root = await fixture(t, {
+    'notes/start.md': article('start', '[**없는 글**과 `코드`](../reference/missing%20file.md?mode=read#part) [초안](draft.md#heading) [정상](../reference/%EB%AC%B8%EC%84%9C.md?mode=read#heading)\n\n[참조 *별칭*][missing]\n\n[missing]: ../reference/missing%20file.md?mode=read#part'),
+    'notes/draft.md': article('draft', 'DRAFT_PRIVATE_BODY', 'draft: true'),
+    'reference/문서.md': article('published', '## Heading'),
+  });
+  const warnings = [];
+  const result = await buildCatalog(root, { onWarning: message => warnings.push(message) });
+  const html = result.articles.start.html;
+  assert.match(html, /<strong>없는 글<\/strong>과 <code>코드<\/code> 초안 <a href="\/posts\/published\?mode=read#heading">정상<\/a>/);
+  assert.match(html, /<p>참조 <em>별칭<\/em><\/p>/);
+  assert.equal((html.match(/<a /g) || []).length, 1);
+  assert.equal(warnings.length, 2);
+  assert.ok(warnings.some(message => message.includes('notes/start.md:') && message.includes('missing%20file.md?mode=read#part')));
+  assert.ok(warnings.some(message => message.includes('"draft.md#heading"')));
+  assert.doesNotMatch(JSON.stringify(result), /DRAFT_PRIVATE_BODY/);
+});
+
+test('unwrapping missing Markdown links still validates and rewrites their image children', async t => {
+  const root = await fixture(t, {
+    'start.md': article('start', '[![그림](image.png)](missing.md) [정상](published.md)'),
+    'published.md': article('published'),
+    'image.png': 'image bytes',
+  });
+  const warnings = [];
+  const result = await buildCatalog(root, { onWarning: message => warnings.push(message) });
+  assert.match(result.articles.start.html, /src="\/content-assets\/image.png"/);
+  assert.match(result.articles.start.html, /href="\/posts\/published">정상<\/a>/);
+  assert.deepEqual(result.usedAssets, ['posts/image.png']);
+  assert.equal(warnings.length, 1);
+  await writeFile(path.join(root, 'posts/start.md'), article('start', '[![그림](missing.png)](missing.md)'));
+  await assert.rejects(buildCatalog(root, { onWarning: () => {} }), /start.md: local asset does not exist/);
+});
+
+test('missing assets and invalid article paths still fail with a source filename', async t => {
+  for (const body of ['![이미지](missing.png)', '[밖의 파일](../../outside.png)', '[밖의 글](../../outside.md)', '[숨김 글](.private.md)', '[잘못된 인코딩](bad%ZZ.md)', '[[../../outside]]', '[[..%2F..%2Foutside]]', '[[posts/../../outside]]', '[[.private]]', '[[bad%5Cpath]]', '[[bad%00path]]', '[[bad%ZZ]]', '[[javascript:alert(1)]]']) {
     const root = await fixture(t, { 'a.md': article('one', body) });
     await assert.rejects(buildCatalog(root), /a.md:/);
   }
-  const root = await fixture(t, { 'a.md': article('one', '[초안](draft.md)'), 'draft.md': article('draft', '작성 중', 'draft: true') });
-  await assert.rejects(buildCatalog(root), /missing or unpublished/);
 });
 
 test('raw HTML and unsafe link protocols are not executable in rendered articles', async t => {

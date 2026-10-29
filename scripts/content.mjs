@@ -14,7 +14,7 @@ import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import rehypeSlug from 'rehype-slug';
 import rehypeKatex from 'rehype-katex';
 import rehypeStringify from 'rehype-stringify';
-import { visit } from 'unist-util-visit';
+import { SKIP, visit } from 'unist-util-visit';
 import { createHighlighter } from 'shiki';
 import { writeSiteAssets } from './site-assets.mjs';
 import { buildShorts } from './shorts.mjs';
@@ -153,7 +153,7 @@ function textSourceOffsets(original) {
   return offsets;
 }
 
-function wikiLinks({ post, allPosts, files, usedAssets }) {
+function wikiLinks({ post, allPosts, files, usedAssets, warnMissingArticle }) {
   function image(value, alias) {
     const { decoded, suffix } = localPath(value, post.sourcePath);
     const explicit = /^\/?(?:posts|images)\//.test(decoded);
@@ -178,8 +178,15 @@ function wikiLinks({ post, allPosts, files, usedAssets }) {
   function resolve(value) {
     const [destination, ...headingParts] = value.split('#');
     const name = destination.trim().replace(/\.md$/i, '');
+    if (headingParts.join('#').trim().startsWith('^')) throw new Error(`${post.sourcePath}: wiki block links are not supported: ${value}`);
     let target = post;
     if (name) {
+      // Missing links may fall back to text, but invalid local paths must still fail.
+      const { decoded } = localPath(destination.trim(), post.sourcePath);
+      if (/^[a-z][a-z\d+.-]*:/i.test(decoded) || decoded.startsWith('//')) throw new Error(`${post.sourcePath}: wiki article links must use a local path: ${value}`);
+      const explicit = /^\/?posts\//.test(decoded) || decoded.startsWith('/');
+      const scoped = path.posix.normalize(path.posix.join('posts', explicit ? '' : post.folder, decoded.replace(/^\/?posts\//, '').replace(/^\//, '')));
+      if (!scoped.startsWith('posts/')) throw new Error(`${post.sourcePath}: article link leaves the posts directory: ${value}`);
       const source = `${name}.md`;
       const relative = path.posix.normalize(path.posix.join(post.folder, source));
       const root = source.replace(/^\/?posts\//, '').replace(/^\//, '');
@@ -190,12 +197,14 @@ function wikiLinks({ post, allPosts, files, usedAssets }) {
         if (matches.length > 1) throw new Error(`${post.sourcePath}: ambiguous wiki link: ${value}; use a folder path`);
         target = matches[0];
       }
-      if (!target || target.draft) throw new Error(`${post.sourcePath}: linked article is missing or unpublished: ${value}`);
+      if (!target || target.draft) {
+        warnMissingArticle(post.sourcePath, value);
+        return null;
+      }
     }
     let fragment = '';
     if (headingParts.length) {
       const heading = headingParts.join('#').trim();
-      if (heading.startsWith('^')) throw new Error(`${post.sourcePath}: wiki block links are not supported: ${value}`);
       // Use the same heading ID generator as the rendered article.
       const tree = { type: 'root', children: [{ type: 'element', tagName: 'h2', properties: {}, children: [{ type: 'text', value: heading }] }] };
       unified().use(rehypeSlug).runSync(tree);
@@ -221,7 +230,12 @@ function wikiLinks({ post, allPosts, files, usedAssets }) {
           if (embed && !imageExtension.test(destination.trim().split(/[?#]/)[0])) continue;
           const alias = aliases.join('|');
           parts.push({ type: 'text', value: node.value.slice(cursor, match.index) });
-          parts.push(embed ? image(destination.trim(), alias) : { type: 'link', url: resolve(destination.trim()), children: [{ type: 'text', value: aliases.length ? alias : destination }] });
+          if (embed) parts.push(image(destination.trim(), alias));
+          else {
+            const url = resolve(destination.trim());
+            const label = { type: 'text', value: aliases.length ? alias : destination };
+            parts.push(url ? { type: 'link', url, children: [label] } : label);
+          }
           cursor = match.index + match[0].length;
         }
         if (!cursor) return [node];
@@ -233,15 +247,21 @@ function wikiLinks({ post, allPosts, files, usedAssets }) {
   };
 }
 
-function rewriteReferences({ post, bySource, files, usedAssets }) {
-  return () => tree => visit(tree, 'element', node => {
+function rewriteReferences({ post, bySource, files, usedAssets, warnMissingArticle }) {
+  return () => tree => visit(tree, 'element', (node, index, parent) => {
     const key = node.tagName === 'img' ? 'src' : node.tagName === 'a' ? 'href' : null;
     const value = key && node.properties?.[key];
     if (!key || typeof value !== 'string' || !value || /^(?:[a-z][a-z\d+.-]*:|\/|#|\?)/i.test(value)) return;
     const { relative, suffix } = referencePath(value, post.sourcePath);
     if (/\.md$/i.test(relative)) {
       const target = relative.startsWith('posts/') ? bySource.get(relative.slice(6)) : undefined;
-      if (!target) throw new Error(`${post.sourcePath}: linked article is missing or unpublished: ${value}`);
+      if (!target) {
+        if (node.tagName !== 'a') throw new Error(`${post.sourcePath}: linked article is missing or unpublished: ${value}`);
+        warnMissingArticle(post.sourcePath, value);
+        parent.children.splice(index, 1, ...node.children);
+        // Revisit the inserted children, including images and following links.
+        return [SKIP, index];
+      }
       node.properties[key] = `/posts/${encodeURIComponent(target.slug)}${suffix}`;
     } else {
       if (!files.has(relative)) throw new Error(`${post.sourcePath}: local asset does not exist: ${value}`);
@@ -281,7 +301,7 @@ function enhanceContent(toc, shiki) {
   };
 }
 
-export async function buildCatalog(rootDirectory, { sample = false, revision = null, previewResolver = null } = {}) {
+export async function buildCatalog(rootDirectory, { sample = false, revision = null, previewResolver = null, onWarning = message => console.warn(message) } = {}) {
   const postsDirectory = path.join(rootDirectory, 'posts');
   const fileList = await walk(postsDirectory);
   const imagesDirectory = path.join(rootDirectory, 'images');
@@ -298,17 +318,24 @@ export async function buildCatalog(rootDirectory, { sample = false, revision = n
   const published = allPosts.filter(post => !post.draft).sort((a, b) => b.date.localeCompare(a.date) || a.slug.localeCompare(b.slug, 'en'));
   const bySource = new Map(published.map(post => [post.sourcePath, post]));
   const usedAssets = new Set();
+  const warnedArticles = new Set();
+  const warnMissingArticle = (sourcePath, target) => {
+    const key = JSON.stringify([sourcePath, target]);
+    if (warnedArticles.has(key)) return;
+    warnedArticles.add(key);
+    onWarning(`[content warning] ${sourcePath}: linked article is missing or unpublished: ${JSON.stringify(target)}; rendered as plain text.`);
+  };
   const articles = {};
   const searchIndex = [];
   const shiki = await highlighter();
   for (const post of published) {
     const markdownTree = unified().use(remarkParse).use(remarkGfm).use(remarkMath).parse(post.body);
-    wikiLinks({ post, allPosts, files, usedAssets })()(markdownTree);
+    wikiLinks({ post, allPosts, files, usedAssets, warnMissingArticle })()(markdownTree);
     const plainText = textOf(markdownTree).replace(/\s+/g, ' ').trim();
     const toc = [];
     const result = await unified().use(remarkParse).use(remarkGfm).use(remarkMath).use(doubleDollarDisplay)
-      .use(wikiLinks({ post, allPosts, files, usedAssets }))
-      .use(remarkRehype).use(rewriteReferences({ post, bySource, files, usedAssets }))
+      .use(wikiLinks({ post, allPosts, files, usedAssets, warnMissingArticle }))
+      .use(remarkRehype).use(rewriteReferences({ post, bySource, files, usedAssets, warnMissingArticle }))
       .use(rehypeSanitize, mathSchema).use(rehypeSlug)
       .use(enhanceContent(toc, shiki)).use(rehypeKatex, { trust: false, strict: 'error', output: 'htmlAndMathml' })
       .use(rehypeStringify).process(post.body);

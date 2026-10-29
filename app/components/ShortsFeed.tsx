@@ -30,16 +30,10 @@ export function ShortsFeed({ entries }: { entries: ShortEntry[] }) {
 }
 
 export function ShortsPreview({ entries, total }: { entries: ShortEntry[]; total: number }) {
-  const disclosureRef = useRef<HTMLDetailsElement>(null);
-  useEffect(() => {
-    if (window.matchMedia('(min-width: 900px)').matches && disclosureRef.current) {
-      disclosureRef.current.open = true;
-    }
-  }, []);
   if (!entries.length) return null;
   return (
     <section className={styles.preview} aria-labelledby="home-shorts-heading">
-      <details ref={disclosureRef} className={styles.previewDisclosure}>
+      <details className={styles.previewDisclosure}>
         <summary className={`${styles.heading} ${styles.previewHeading}`}>
           <h1 id="home-shorts-heading">
             짧은 글 <span>{total}</span>

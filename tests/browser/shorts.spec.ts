@@ -53,7 +53,7 @@ test('short feed is reachable through desktop and mobile navigation', async ({ p
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('짧은 글 5');
 });
 
-test('home shows the latest three shorts and opens the full feed with normal or reduced motion', async ({ page }, testInfo) => {
+test('home shows the latest three shorts and opens the full feed with normal or reduced motion', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   for (const reducedMotion of ['no-preference', 'reduce'] as const) {
@@ -61,10 +61,8 @@ test('home shows the latest three shorts and opens the full feed with normal or 
     await page.goto('/');
     const section = page.locator('section[aria-labelledby="home-shorts-heading"]');
     const disclosure = section.locator('details');
-    if (testInfo.project.name === 'mobile') {
-      await expect(disclosure).not.toHaveAttribute('open');
-      await section.locator('summary').click();
-    }
+    await expect(disclosure).not.toHaveAttribute('open');
+    await section.locator('summary').click();
     await expect(disclosure).toHaveAttribute('open', '');
     const entries = section.getByRole('list', { name: '최근 짧은 글 목록', exact: true }).locator('article');
     await expect(entries).toHaveCount(3);
@@ -82,10 +80,8 @@ test('home shows the latest three shorts and opens the full feed with normal or 
     await expect(page).toHaveURL(/\/shorts$/);
     await expect(page.getByRole('list', { name: '짧은 글 목록', exact: true }).locator('article')).toHaveCount(5);
     await page.goBack();
-    if (testInfo.project.name === 'mobile') {
-      await expect(disclosure).not.toHaveAttribute('open');
-      await section.locator('summary').click();
-    }
+    await expect(disclosure).not.toHaveAttribute('open');
+    await section.locator('summary').click();
     await expect(disclosure).toHaveAttribute('open', '');
     await expect(entries).toHaveCount(3);
     await entries.first().getByRole('link', { name: /글 링크$/ }).click();
@@ -96,7 +92,7 @@ test('home shows the latest three shorts and opens the full feed with normal or 
   expect(errors).toEqual([]);
 });
 
-test('home shorts start collapsed on mobile and share the desktop viewport without pushing more links away', async ({ page }, testInfo) => {
+test('home shorts start collapsed and share the desktop viewport when expanded without pushing more links away', async ({ page }, testInfo) => {
   await page.goto('/');
   await page.evaluate(() => document.fonts.ready);
   const section = page.locator('section[aria-labelledby="home-shorts-heading"]');
@@ -106,18 +102,17 @@ test('home shorts start collapsed on mobile and share the desktop viewport witho
   const region = section.getByRole('region', { name: '최근 짧은 글', exact: true });
   const more = section.getByRole('link', { name: '더 읽기', exact: true });
   await expect(recent).toBeVisible();
-  if (testInfo.project.name === 'mobile') {
-    await expect(disclosure).not.toHaveAttribute('open');
-    await expect(region).not.toBeVisible();
-    const initial = await recent.boundingBox();
-    expect(initial!.y).toBeLessThan(page.viewportSize()!.height / 2);
-    await summary.click();
-  } else {
-    await expect(disclosure).toHaveAttribute('open', '');
-    const initial = await recent.boundingBox();
-    expect(Math.abs(initial!.y - page.viewportSize()!.height / 2)).toBeLessThanOrEqual(40);
+  await expect(disclosure).not.toHaveAttribute('open');
+  await expect(region).not.toBeVisible();
+  const initial = await recent.boundingBox();
+  expect(initial!.y).toBeLessThan(page.viewportSize()!.height / 2);
+  await summary.click();
+  await expect(disclosure).toHaveAttribute('open', '');
+  if (testInfo.project.name === 'desktop') {
+    const opened = await recent.boundingBox();
+    expect(Math.abs(opened!.y - page.viewportSize()!.height / 2)).toBeLessThanOrEqual(40);
     const before = await more.boundingBox();
-    expect(before!.y + before!.height).toBeLessThanOrEqual(initial!.y);
+    expect(before!.y + before!.height).toBeLessThanOrEqual(opened!.y);
     expect(before!.y + before!.height).toBeLessThan(page.viewportSize()!.height);
     await region.evaluate(element => { element.scrollTop = element.scrollHeight; });
     await expect.poll(() => region.evaluate(element => element.scrollTop)).toBeGreaterThan(0);

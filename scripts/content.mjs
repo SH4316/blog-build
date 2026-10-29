@@ -1,62 +1,22 @@
 import 'dotenv/config';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, readFile, writeFile, readdir, rm, mkdtemp, rename, copyFile, cp, lstat } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rm, mkdtemp, rename, copyFile, cp } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
-import { unified } from 'unified';
-import remarkParse from 'remark-parse';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import remarkRehype from 'remark-rehype';
-import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
-import rehypeSlug from 'rehype-slug';
-import rehypeKatex from 'rehype-katex';
-import rehypeStringify from 'rehype-stringify';
-import { SKIP, visit } from 'unist-util-visit';
-import { createHighlighter } from 'shiki';
 import { writeSiteAssets } from './site-assets.mjs';
 import { buildShorts } from './shorts.mjs';
 import { createShortPreviewResolver } from './short-previews.mjs';
-import { assetUrl, imageExtension, localPath, textSourceOffsets, wikiImage } from './local-images.mjs';
+import { assetUrl } from './local-images.mjs';
+import { collectContentFiles } from './content-inventory.mjs';
+import { renderArticle } from './article-renderer.mjs';
+
+export { walk } from './content-inventory.mjs';
 
 const exec = promisify(execFile);
 export const projectDir = fileURLToPath(new URL('../', import.meta.url));
 export const siteUrl = 'https://blog.soohyuk.dev';
-let highlighterPromise;
-const mathSchema = {
-  ...defaultSchema,
-  attributes: {
-    ...defaultSchema.attributes,
-    code: [
-      ...(defaultSchema.attributes?.code || []).filter(attribute => !Array.isArray(attribute) || attribute[0] !== 'className'),
-      ['className', /^language-./, 'math-inline', 'math-display'],
-    ],
-  },
-};
-
-function highlighter() {
-  highlighterPromise ??= createHighlighter({
-    themes: ['github-light-default', 'github-dark-default'],
-    langs: ['typescript', 'javascript', 'tsx', 'jsx', 'json', 'bash', 'html', 'css', 'python', 'rust', 'go', 'sql', 'yaml', 'markdown', 'diff', 'http'],
-  });
-  return highlighterPromise;
-}
-
-export async function walk(directory, prefix = '') {
-  if ((await lstat(directory)).isSymbolicLink()) throw new Error(`Symbolic links are not supported: ${prefix || path.basename(directory)}`);
-  const files = [];
-  for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name, 'en'))) {
-    if (entry.name.startsWith('.')) continue;
-    if (entry.isSymbolicLink()) throw new Error(`Symbolic links are not supported: ${prefix}${entry.name}`);
-    const relative = prefix + entry.name;
-    if (entry.isDirectory()) files.push(...await walk(path.join(directory, entry.name), `${relative}/`));
-    else if (entry.isFile()) files.push(relative);
-  }
-  return files;
-}
-
 function validDate(value, field, source) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`)) || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value) {
     throw new Error(`${source}: ${field} must be a valid quoted YYYY-MM-DD date`);
@@ -92,170 +52,9 @@ export function parsePost(raw, sourcePath) {
   };
 }
 
-function textOf(node) {
-  if (node.type === 'text' || node.type === 'inlineCode' || node.type === 'code' || node.type === 'inlineMath' || node.type === 'math') return node.value || '';
-  // Image alt text remains in the body, but filenames are not prose excerpts.
-  if (node.type === 'image') return '';
-  return (node.children || []).map(textOf).join(node.type === 'root' ? '\n' : ' ');
-}
-
-function doubleDollarDisplay() {
-  return (tree, file) => visit(tree, 'inlineMath', node => {
-    const original = String(file.value).slice(node.position.start.offset, node.position.end.offset);
-    if (original.startsWith('$$')) node.data.hProperties.className = ['language-math', 'math-display'];
-  });
-}
-
-function allowedAssetPath(relative, value, sourcePath) {
-  if (!relative.startsWith('posts/') && !relative.startsWith('images/')) throw new Error(`${sourcePath}: link leaves the posts and images directories: ${value}`);
-  return relative;
-}
-
-function referencePath(value, sourcePath) {
-  const { decoded, suffix } = localPath(value, sourcePath);
-  const relative = allowedAssetPath(path.posix.normalize(path.posix.join('posts', path.posix.dirname(sourcePath), decoded)), value, sourcePath);
-  return { relative, suffix };
-}
-
-function wikiLinks({ post, allPosts, files, usedAssets, warnMissingArticle }) {
-  const image = (value, alias) => wikiImage(value, alias, { sourcePath: post.sourcePath, folder: post.folder, scope: 'posts', files, usedAssets });
-  function resolve(value) {
-    const [destination, ...headingParts] = value.split('#');
-    const name = destination.trim().replace(/\.md$/i, '');
-    if (headingParts.join('#').trim().startsWith('^')) throw new Error(`${post.sourcePath}: wiki block links are not supported: ${value}`);
-    let target = post;
-    if (name) {
-      // Missing links may fall back to text, but invalid local paths must still fail.
-      const { decoded } = localPath(destination.trim(), post.sourcePath);
-      if (/^[a-z][a-z\d+.-]*:/i.test(decoded) || decoded.startsWith('//')) throw new Error(`${post.sourcePath}: wiki article links must use a local path: ${value}`);
-      const explicit = /^\/?posts\//.test(decoded) || decoded.startsWith('/');
-      const scoped = path.posix.normalize(path.posix.join('posts', explicit ? '' : post.folder, decoded.replace(/^\/?posts\//, '').replace(/^\//, '')));
-      if (!scoped.startsWith('posts/')) throw new Error(`${post.sourcePath}: article link leaves the posts directory: ${value}`);
-      const source = `${name}.md`;
-      const relative = path.posix.normalize(path.posix.join(post.folder, source));
-      const root = source.replace(/^\/?posts\//, '').replace(/^\//, '');
-      target = allPosts.find(item => item.sourcePath === relative)
-        || allPosts.find(item => item.sourcePath === root);
-      if (!target && !name.startsWith('.')) {
-        const matches = allPosts.filter(item => item.sourcePath === source || item.sourcePath.endsWith(`/${source}`));
-        if (matches.length > 1) throw new Error(`${post.sourcePath}: ambiguous wiki link: ${value}; use a folder path`);
-        target = matches[0];
-      }
-      if (!target || target.draft) {
-        warnMissingArticle(post.sourcePath, value);
-        return null;
-      }
-    }
-    let fragment = '';
-    if (headingParts.length) {
-      const heading = headingParts.join('#').trim();
-      // Use the same heading ID generator as the rendered article.
-      const tree = { type: 'root', children: [{ type: 'element', tagName: 'h2', properties: {}, children: [{ type: 'text', value: heading }] }] };
-      unified().use(rehypeSlug).runSync(tree);
-      fragment = `#${encodeURIComponent(tree.children[0].properties.id)}`;
-    }
-    return `/posts/${encodeURIComponent(target.slug)}${fragment}`;
-  }
-  return () => tree => {
-    function transform(parent) {
-      if (!parent.children || ['link', 'linkReference'].includes(parent.type)) return;
-      parent.children = parent.children.flatMap(node => {
-        if (node.type !== 'text') { transform(node); return [node]; }
-        const parts = [];
-        let cursor = 0;
-        const original = post.body.slice(node.position.start.offset, node.position.end.offset);
-        const offsets = textSourceOffsets(original);
-        for (const match of node.value.matchAll(/(!?)\[\[([^\[\]\n]+)\]\]/g)) {
-          // Markdown text nodes have already unescaped backslashes and entities.
-          // Check the source so escaped examples remain literal.
-          if (original.slice(offsets[match.index], offsets[match.index + match[0].length]) !== match[0]) continue;
-          const [destination, ...aliases] = match[2].split('|');
-          const embed = match[1] === '!';
-          if (embed && !imageExtension.test(destination.trim().split(/[?#]/)[0])) continue;
-          const alias = aliases.join('|');
-          parts.push({ type: 'text', value: node.value.slice(cursor, match.index) });
-          if (embed) parts.push(image(destination.trim(), alias));
-          else {
-            const url = resolve(destination.trim());
-            const label = { type: 'text', value: aliases.length ? alias : destination };
-            parts.push(url ? { type: 'link', url, children: [label] } : label);
-          }
-          cursor = match.index + match[0].length;
-        }
-        if (!cursor) return [node];
-        parts.push({ type: 'text', value: node.value.slice(cursor) });
-        return parts;
-      });
-    }
-    transform(tree);
-  };
-}
-
-function rewriteReferences({ post, bySource, files, usedAssets, warnMissingArticle }) {
-  return () => tree => visit(tree, 'element', (node, index, parent) => {
-    const key = node.tagName === 'img' ? 'src' : node.tagName === 'a' ? 'href' : null;
-    const value = key && node.properties?.[key];
-    if (!key || typeof value !== 'string' || !value || /^(?:[a-z][a-z\d+.-]*:|\/|#|\?)/i.test(value)) return;
-    const { relative, suffix } = referencePath(value, post.sourcePath);
-    if (/\.md$/i.test(relative)) {
-      const target = relative.startsWith('posts/') ? bySource.get(relative.slice(6)) : undefined;
-      if (!target) {
-        if (node.tagName !== 'a') throw new Error(`${post.sourcePath}: linked article is missing or unpublished: ${value}`);
-        warnMissingArticle(post.sourcePath, value);
-        parent.children.splice(index, 1, ...node.children);
-        // Revisit the inserted children, including images and following links.
-        return [SKIP, index];
-      }
-      node.properties[key] = `/posts/${encodeURIComponent(target.slug)}${suffix}`;
-    } else {
-      if (!files.has(relative)) throw new Error(`${post.sourcePath}: local asset does not exist: ${value}`);
-      usedAssets.add(relative);
-      node.properties[key] = `${assetUrl(relative)}${suffix}`;
-    }
-    if (node.tagName === 'img') { node.properties.loading = 'lazy'; node.properties.decoding = 'async'; }
-  });
-}
-
-function enhanceContent(toc, shiki) {
-  return () => tree => {
-    visit(tree, 'element', node => {
-      if (/^h[1-6]$/.test(node.tagName)) node.properties.className = [...(node.properties.className || []), 'proseHeading'];
-      if (/^h[2-4]$/.test(node.tagName)) {
-        const text = textOf(node).trim();
-        toc.push({ id: node.properties.id, text, level: Number(node.tagName[1]) });
-        node.children.push({ type: 'element', tagName: 'a', properties: { href: `#${node.properties.id}`, className: ['headingAnchor'], ariaLabel: `${text} 섹션 링크` }, children: [{ type: 'text', value: '#' }] });
-      }
-      if (node.tagName === 'img') { node.properties.loading = 'lazy'; node.properties.decoding = 'async'; }
-      if (node.tagName !== 'pre' || node.children?.[0]?.tagName !== 'code') return;
-      const code = node.children[0];
-      const classes = code.properties.className || [];
-      if (classes.some(value => value === 'language-math')) return;
-      const requested = classes.find(value => value.startsWith('language-'))?.slice(9) || 'text';
-      if (requested.toLowerCase() === 'mermaid') {
-        node.properties = { 'data-language': 'mermaid', 'data-mermaid': '', tabIndex: 0 };
-        code.properties = { className: ['language-mermaid'] };
-        return;
-      }
-      const language = shiki.getLoadedLanguages().includes(requested) ? requested : 'text';
-      const highlighted = shiki.codeToHast(textOf(code).replace(/\n$/, ''), { lang: language, themes: { light: 'github-light-default', dark: 'github-dark-default' }, defaultColor: false });
-      const pre = highlighted.children.find(child => child.type === 'element' && child.tagName === 'pre');
-      node.properties = { ...pre.properties, 'data-language': requested };
-      node.children = pre.children;
-    });
-  };
-}
-
 export async function buildCatalog(rootDirectory, { sample = false, revision = null, previewResolver = null, onWarning = message => console.warn(message) } = {}) {
   const postsDirectory = path.join(rootDirectory, 'posts');
-  const fileList = await walk(postsDirectory);
-  const imagesDirectory = path.join(rootDirectory, 'images');
-  let imageFiles = [];
-  try { await lstat(imagesDirectory); imageFiles = await walk(imagesDirectory); }
-  catch (error) { if (error.code !== 'ENOENT') throw error; }
-  let shortFiles = [];
-  try { await lstat(path.join(rootDirectory, 'shorts')); shortFiles = await walk(path.join(rootDirectory, 'shorts')); }
-  catch (error) { if (error.code !== 'ENOENT') throw error; }
-  const files = new Set([...fileList.map(file => `posts/${file}`), ...imageFiles.filter(file => imageExtension.test(file)).map(file => `images/${file}`), ...shortFiles.filter(file => imageExtension.test(file)).map(file => `shorts/${file}`)]);
+  const { postFiles: fileList, shortFiles, files } = await collectContentFiles(rootDirectory);
   const allPosts = await Promise.all(fileList.filter(file => file.toLowerCase().endsWith('.md')).map(async source => parsePost(await readFile(path.join(postsDirectory, source), 'utf8'), source)));
   const slugs = new Set();
   for (const post of allPosts) {
@@ -274,23 +73,12 @@ export async function buildCatalog(rootDirectory, { sample = false, revision = n
   };
   const articles = {};
   const searchIndex = [];
-  const shiki = await highlighter();
   for (const post of published) {
-    const markdownTree = unified().use(remarkParse).use(remarkGfm).use(remarkMath).parse(post.body);
-    wikiLinks({ post, allPosts, files, usedAssets, warnMissingArticle })()(markdownTree);
-    const plainText = textOf(markdownTree).replace(/\s+/g, ' ').trim();
-    const toc = [];
-    const result = await unified().use(remarkParse).use(remarkGfm).use(remarkMath).use(doubleDollarDisplay)
-      .use(wikiLinks({ post, allPosts, files, usedAssets, warnMissingArticle }))
-      .use(remarkRehype).use(rewriteReferences({ post, bySource, files, usedAssets, warnMissingArticle }))
-      .use(rehypeSanitize, mathSchema).use(rehypeSlug)
-      .use(enhanceContent(toc, shiki)).use(rehypeKatex, { trust: false, strict: 'error', output: 'htmlAndMathml' })
-      .use(rehypeStringify).process(post.body);
-    if (result.messages.length) throw new Error(`${post.sourcePath}: ${result.messages.map(message => message.reason).join('; ')}`);
+    const { html, toc, plainText } = await renderArticle(post, { allPosts, bySource, files, usedAssets, warnMissingArticle });
     const { body, draft, ...summary } = post;
     summary.description ||= [...plainText].slice(0, 155).join('');
     summary.readingMinutes = Math.max(1, Math.ceil(plainText.length / 700));
-    articles[post.slug] = { ...summary, html: String(result), toc };
+    articles[post.slug] = { ...summary, html, toc };
     searchIndex.push({ ...summary, text: plainText });
   }
   const folders = new Set();
@@ -299,7 +87,7 @@ export async function buildCatalog(rootDirectory, { sample = false, revision = n
     while (folder) { folders.add(folder); folder = path.posix.dirname(folder); if (folder === '.') break; }
   }
   const summaries = published.map(post => { const { html, toc, ...summary } = articles[post.slug]; return summary; });
-  const shorts = await buildShorts(rootDirectory, { previewResolver, files, usedAssets });
+  const shorts = await buildShorts(rootDirectory, { previewResolver, files, usedAssets, sourceFiles: shortFiles });
   const usedPreviews = new Set(shorts.map(short => short.preview?.image?.slice('/short-previews/'.length)).filter(Boolean));
   return {
     catalog: { posts: summaries, folders: [...folders].sort((a, b) => a.localeCompare(b, 'ko')), tags: [...new Set(summaries.flatMap(post => post.tags))].sort((a, b) => a.localeCompare(b, 'ko')), sample, revision },

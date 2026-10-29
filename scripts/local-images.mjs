@@ -1,7 +1,4 @@
-import { lstat, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { unified } from 'unified';
-import remarkParse from 'remark-parse';
 
 export const imageExtension = /\.(?:apng|avif|bmp|gif|ico|jpe?g|png|svg|webp)$/i;
 const assetPrefixes = { posts: '/content-assets/', images: '/content-images/', shorts: '/short-assets/' };
@@ -20,6 +17,14 @@ export function assetUrl(relative) {
   const [root, ...segments] = relative.split('/');
   if (!assetPrefixes[root] || !segments.length || segments.some(segment => !segment || segment === '.' || segment === '..')) throw new Error(`Invalid local asset path: ${relative}`);
   return `${assetPrefixes[root]}${segments.map(encodeURIComponent).join('/')}`;
+}
+
+// Generated URLs still pass the same local-path and inventory validation as authored URLs.
+export function assetSourcePath(value) {
+  for (const [root, prefix] of Object.entries(assetPrefixes)) {
+    if (value.startsWith(prefix)) return `/${root}/${value.slice(prefix.length)}`;
+  }
+  return value;
 }
 
 function allowedImagePath(relative, value, sourcePath, scope) {
@@ -58,50 +63,4 @@ export function shortImagePath(value, { sourcePath, folder, files, usedAssets })
   if (!files.has(relative)) throw new Error(`${sourcePath}: local image does not exist: ${value}`);
   usedAssets.add(relative);
   return `${assetUrl(relative)}${suffix}`;
-}
-
-export async function localImageFiles(rootDirectory, roots = ['posts', 'images']) {
-  const files = [];
-  async function walk(directory, prefix) {
-    if ((await lstat(directory)).isSymbolicLink()) throw new Error(`${prefix}: symbolic links are not supported`);
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      if (entry.name.startsWith('.')) continue;
-      const relative = `${prefix}/${entry.name}`;
-      if (entry.isSymbolicLink()) throw new Error(`${relative}: symbolic links are not supported`);
-      if (entry.isDirectory()) await walk(path.join(directory, entry.name), relative);
-      else if (entry.isFile() && imageExtension.test(entry.name)) files.push(relative);
-    }
-  }
-  for (const root of roots) {
-    try { await lstat(path.join(rootDirectory, root)); }
-    catch (error) { if (error.code === 'ENOENT') continue; throw error; }
-    await walk(path.join(rootDirectory, root), root);
-  }
-  return files;
-}
-
-function textOf(node) {
-  return typeof node.value === 'string' ? node.value : (node.children || []).map(textOf).join('');
-}
-
-export function textSourceOffsets(original) {
-  const offsets = [];
-  for (let index = 0; index < original.length;) {
-    let raw = original[index];
-    let decoded = raw;
-    if (raw === '\\' && /[\u0021-\u002f\u003a-\u0040\u005b-\u0060\u007b-\u007e]/.test(original[index + 1] || '')) {
-      raw = original.slice(index, index + 2);
-      decoded = raw[1];
-    } else if (raw === '&') {
-      const entity = /^&(?:#(?:[xX][\da-fA-F]+|\d+)|[A-Za-z][A-Za-z\d]+);/.exec(original.slice(index));
-      if (entity) {
-        raw = entity[0];
-        decoded = textOf(unified().use(remarkParse).parse(raw));
-      }
-    }
-    offsets.push(...Array(decoded.length).fill(index));
-    index += raw.length;
-  }
-  offsets.push(original.length);
-  return offsets;
 }

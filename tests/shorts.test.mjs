@@ -128,11 +128,11 @@ test('a missing shorts folder is compatible with existing content; symlinks fail
   assert.deepEqual(await buildShorts(root), []);
   const outside = await fixture(t, { 'outside.md': note() });
   await symlink(path.join(outside, 'shorts'), path.join(root, 'shorts'));
-  await assert.rejects(buildShorts(root), /symbolic links are not supported/);
+  await assert.rejects(buildShorts(root), /symbolic links are not supported/i);
   await rm(path.join(root, 'shorts'));
   await mkdir(path.join(root, 'shorts'));
   await symlink(path.join(outside, 'shorts/outside.md'), path.join(root, 'shorts/linked.md'));
-  await assert.rejects(buildShorts(root), /symbolic links are not supported/);
+  await assert.rejects(buildShorts(root), /symbolic links are not supported/i);
 });
 
 test('sanitized empty prose needs a link, while link-only entries are supported', async t => {
@@ -339,4 +339,32 @@ test('new short attachments do not change ordinary article image lookup scope', 
   assert.deepEqual(result.usedAssets, ['images/shared.png']);
   await rm(path.join(root, 'images/shared.png'));
   await assert.rejects(buildCatalog(root), /article.md:.*local image does not exist/);
+});
+
+test('standalone and catalog short inventories agree while preserving optional roots and article attachments', async t => {
+  const root = await fixture(t, {
+    'notes/entry.md': note('![[local.png|120]]'),
+    'notes/local.png': 'short image',
+    'private.md': note('![[missing.png]]', 'draft: true'),
+  });
+  await rm(path.join(root, 'posts'), { recursive: true });
+  const standaloneAssets = new Set();
+  const standalone = await buildShorts(root, { usedAssets: standaloneAssets });
+  assert.equal(standalone.length, 1);
+  assert.deepEqual([...standaloneAssets], ['shorts/notes/local.png']);
+
+  await attachment(root, 'posts/article.md', '---\ntitle: "첨부 글"\nslug: "article"\ndate: "2026-10-28"\n---\n[자료](files/data.pdf)');
+  await attachment(root, 'posts/files/data.pdf', 'article attachment');
+  await attachment(root, 'posts/images/diagram.svg', 'posts image');
+  await attachment(root, 'images/shared.png', 'root image');
+  await writeFile(path.join(root, 'shorts/notes/entry.md'), note('![[local.png|120]] ![[images/shared.png|그림]] ![도표](/posts/images/diagram.svg) [[article]]'));
+  standaloneAssets.clear();
+  const entries = await buildShorts(root, { usedAssets: standaloneAssets });
+  const catalog = await buildCatalog(root);
+  assert.deepEqual(entries, catalog.shorts);
+  assert.deepEqual([...standaloneAssets].sort(), ['images/shared.png', 'posts/images/diagram.svg', 'shorts/notes/local.png']);
+  assert.deepEqual(catalog.usedAssets.sort(), [...standaloneAssets, 'posts/files/data.pdf'].sort());
+  assert.match(catalog.articles.article.html, /href="\/content-assets\/files\/data.pdf"/);
+  // The shared scanner does not expand the shorts policy to resolve article wiki links.
+  assert.match(entries[0].html, /\[\[article\]\]/);
 });

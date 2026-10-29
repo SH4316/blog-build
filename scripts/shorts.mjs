@@ -1,4 +1,4 @@
-import { lstat, readdir, readFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { unified } from 'unified';
@@ -8,7 +8,9 @@ import remarkRehype from 'remark-rehype';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import rehypeStringify from 'rehype-stringify';
 import { SKIP, visit } from 'unist-util-visit';
-import { imageExtension, localImageFiles, shortImagePath, textSourceOffsets, wikiImage } from './local-images.mjs';
+import { assetSourcePath, imageExtension, shortImagePath, wikiImage } from './local-images.mjs';
+import { markdownWiki } from './markdown-wiki.mjs';
+import { collectContentFiles, walk } from './content-inventory.mjs';
 
 const shortSchema = {
   ...defaultSchema,
@@ -67,19 +69,6 @@ export function parseShort(raw, sourcePath) {
   };
 }
 
-async function shortFiles(directory, prefix = '') {
-  if ((await lstat(directory)).isSymbolicLink()) throw new Error(`shorts/${prefix}: symbolic links are not supported`);
-  const files = [];
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
-    if (entry.name.startsWith('.')) continue;
-    const relative = `${prefix}${entry.name}`;
-    if (entry.isSymbolicLink()) throw new Error(`shorts/${relative}: symbolic links are not supported`);
-    if (entry.isDirectory()) files.push(...await shortFiles(path.join(directory, entry.name), `${relative}/`));
-    else if (entry.isFile()) files.push(relative);
-  }
-  return files.sort();
-}
-
 function safeShortLinks() {
   return tree => visit(tree, 'element', node => {
     if (node.tagName !== 'a' || typeof node.properties.href !== 'string') return;
@@ -93,32 +82,12 @@ function safeShortLinks() {
 }
 
 function shortWikiImages(short, files, usedAssets) {
-  return () => tree => {
-    function transform(parent) {
-      if (!parent.children || ['link', 'linkReference'].includes(parent.type)) return;
-      parent.children = parent.children.flatMap(node => {
-        if (node.type !== 'text') { transform(node); return [node]; }
-        const original = short.body.slice(node.position.start.offset, node.position.end.offset);
-        const offsets = textSourceOffsets(original);
-        const parts = [];
-        let cursor = 0;
-        for (const match of node.value.matchAll(/!\[\[([^\[\]\n]+)\]\]/g)) {
-          if (original.slice(offsets[match.index], offsets[match.index + match[0].length]) !== match[0]) continue;
-          const [destination, ...aliases] = match[1].split('|');
-          if (!imageExtension.test(destination.trim().split(/[?#]/)[0])) continue;
-          parts.push({ type: 'text', value: node.value.slice(cursor, match.index) });
-          parts.push(wikiImage(destination.trim(), aliases.join('|'), {
-            sourcePath: `shorts/${short.sourcePath}`, folder: path.posix.dirname(short.sourcePath), scope: 'shorts', files, usedAssets,
-          }));
-          cursor = match.index + match[0].length;
-        }
-        if (!cursor) return [node];
-        parts.push({ type: 'text', value: node.value.slice(cursor) });
-        return parts;
-      });
-    }
-    transform(tree);
-  };
+  return markdownWiki(short.body, ({ destination, alias, embed }) => {
+    if (!embed || !imageExtension.test(destination.trim().split(/[?#]/)[0])) return null;
+    return wikiImage(destination.trim(), alias, {
+      sourcePath: `shorts/${short.sourcePath}`, folder: path.posix.dirname(short.sourcePath), scope: 'shorts', files, usedAssets,
+    });
+  });
 }
 
 function shortLocalImages(short, files, usedAssets) {
@@ -130,25 +99,17 @@ function shortLocalImages(short, files, usedAssets) {
       parent.children.splice(index, 1);
       return [SKIP, index];
     }
-    // Resolve generated wiki URLs through the same inventory check as authored URLs.
-    const assetRoots = { '/content-images/': '/images/', '/content-assets/': '/posts/', '/short-assets/': '/shorts/' };
-    const prefix = Object.keys(assetRoots).find(prefix => value.startsWith(prefix));
-    const local = prefix ? `${assetRoots[prefix]}${value.slice(prefix.length)}` : value;
-    node.properties.src = shortImagePath(local, {
+    node.properties.src = shortImagePath(assetSourcePath(value), {
       sourcePath: `shorts/${short.sourcePath}`, folder: path.posix.dirname(short.sourcePath), files, usedAssets,
     });
   });
 }
 
-export async function buildShorts(rootDirectory, { previewResolver = null, files: sharedFiles = null, usedAssets = new Set() } = {}) {
+export async function buildShorts(rootDirectory, { previewResolver = null, files: sharedFiles = null, usedAssets = new Set(), sourceFiles = null } = {}) {
   const directory = path.join(rootDirectory, 'shorts');
-  let files;
-  try { files = await shortFiles(directory); }
-  catch (error) { if (error.code === 'ENOENT') return []; throw error; }
-  const imageFiles = sharedFiles || new Set([
-    ...files.filter(file => imageExtension.test(file)).map(file => `shorts/${file}`),
-    ...await localImageFiles(rootDirectory),
-  ]);
+  const files = sourceFiles ?? await walk(directory, '', { optional: true });
+  if (!files) return [];
+  const imageFiles = sharedFiles || (await collectContentFiles(rootDirectory, { requirePosts: false, shortFiles: files })).files;
   const parsed = await Promise.all(files.filter(file => /\.md$/i.test(file)).map(async file => parseShort(await readFile(path.join(directory, file), 'utf8'), file)));
   const timestamp = date => Date.parse(date.includes('T') ? date : `${date}T00:00:00+09:00`);
   parsed.sort((a, b) => timestamp(b.date) - timestamp(a.date) || (a.sourcePath < b.sourcePath ? -1 : a.sourcePath > b.sourcePath ? 1 : 0));

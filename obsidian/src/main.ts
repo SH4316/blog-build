@@ -16,6 +16,7 @@ function message(error: unknown): string {
 export default class BlogFrontmatterPlugin extends Plugin {
   settings: BlogSettings = loadSettings(null);
   private pending: Promise<unknown> = Promise.resolve();
+  private settingsPending: Promise<void> = Promise.resolve();
   private active = false;
 
   async onload(): Promise<void> {
@@ -140,16 +141,20 @@ export default class BlogFrontmatterPlugin extends Plugin {
     return added;
   }
 
-  async updateSettings(changes: Partial<BlogSettings>): Promise<void> {
-    const previous = this.settings;
-    const next = { ...previous, ...changes };
-    next.targetFolder = normalizePostFolder(next.targetFolder);
-    this.settings = next;
-    try { await this.saveData(this.settings); }
-    catch (error) {
-      this.settings = previous;
-      throw error;
-    }
+  updateSettings(changes: Partial<BlogSettings>): Promise<void> {
+    const result = this.settingsPending.then(async () => {
+      const previous = this.settings;
+      const next = { ...previous, ...changes };
+      next.targetFolder = normalizePostFolder(next.targetFolder);
+      this.settings = next;
+      try { await this.saveData(next); }
+      catch (error) {
+        this.settings = previous;
+        throw error;
+      }
+    });
+    this.settingsPending = result.catch(() => undefined);
+    return result;
   }
 
   createPost(titleInput: string): Promise<void> {

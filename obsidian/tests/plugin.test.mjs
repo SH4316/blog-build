@@ -2,6 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { frontmatterInfo, harness, metadata, note } from './harness.mjs';
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  return { promise, resolve, reject };
+}
+
 test('startup leaves existing files alone; only new posts after layout readiness receive defaults', async () => {
   const h = await harness(undefined, { 'posts/existing.md': '기존 본문\n' });
   await h.vault.create('posts/loading.md', '시작 중 읽은 파일\n');
@@ -127,6 +137,89 @@ test('settings reject invalid folder/tags while retaining the previous valid val
   assert.equal(h.plugin.settings.targetFolder, 'blog/posts');
   assert.deepEqual(Array.from(h.plugin.settings.defaultTags), ['C++', 'C#']);
   assert.equal(tags.text.inputEl.attrs.has('aria-invalid'), false);
+});
+
+test('a delayed settings-save failure rolls back before the next change is merged and saved', async () => {
+  const h = await harness({ targetFolder: 'posts', draft: true });
+  const firstSave = deferred();
+  const firstStarted = deferred();
+  const saves = [];
+  h.plugin.saveData = data => {
+    saves.push({ targetFolder: data.targetFolder, draft: data.draft });
+    if (saves.length === 1) {
+      firstStarted.resolve();
+      return firstSave.promise;
+    }
+    return Promise.resolve();
+  };
+
+  const first = h.plugin.updateSettings({ targetFolder: 'blog/posts' });
+  const firstRejected = assert.rejects(first, /first save failed/);
+  const second = h.plugin.updateSettings({ draft: false });
+  await firstStarted.promise;
+  assert.deepEqual(saves, [{ targetFolder: 'blog/posts', draft: true }]);
+
+  firstSave.reject(new Error('first save failed'));
+  await firstRejected;
+  await second;
+  assert.deepEqual(saves, [
+    { targetFolder: 'blog/posts', draft: true },
+    { targetFolder: 'posts', draft: false },
+  ]);
+  assert.equal(h.plugin.settings.targetFolder, 'posts');
+  assert.equal(h.plugin.settings.draft, false);
+});
+
+test('queued settings changes retain successful saves and continue after a later save fails', async () => {
+  const h = await harness({ targetFolder: 'posts', draft: true, autoAdd: true });
+  const firstSave = deferred();
+  const secondSave = deferred();
+  const secondStarted = deferred();
+  const saves = [];
+  h.plugin.saveData = data => {
+    saves.push({ targetFolder: data.targetFolder, draft: data.draft, autoAdd: data.autoAdd });
+    if (saves.length === 1) return firstSave.promise;
+    if (saves.length === 2) {
+      secondStarted.resolve();
+      return secondSave.promise;
+    }
+    return Promise.resolve();
+  };
+
+  const first = h.plugin.updateSettings({ targetFolder: 'blog/posts' });
+  const second = h.plugin.updateSettings({ draft: false });
+  const secondRejected = assert.rejects(second, /second save failed/);
+  const third = h.plugin.updateSettings({ autoAdd: false });
+  firstSave.resolve();
+  await first;
+  await secondStarted.promise;
+  assert.deepEqual(saves, [
+    { targetFolder: 'blog/posts', draft: true, autoAdd: true },
+    { targetFolder: 'blog/posts', draft: false, autoAdd: true },
+  ]);
+
+  secondSave.reject(new Error('second save failed'));
+  await secondRejected;
+  await third;
+  assert.deepEqual(saves.at(-1), { targetFolder: 'blog/posts', draft: true, autoAdd: false });
+  assert.equal(h.plugin.settings.targetFolder, 'blog/posts');
+  assert.equal(h.plugin.settings.draft, true);
+  assert.equal(h.plugin.settings.autoAdd, false);
+});
+
+test('invalid queued settings are not saved and do not block a later valid change', async () => {
+  const h = await harness({ targetFolder: 'posts', draft: true });
+  const saves = [];
+  h.plugin.saveData = async data => {
+    saves.push({ targetFolder: data.targetFolder, draft: data.draft });
+  };
+  const invalid = h.plugin.updateSettings({ targetFolder: '../secret' });
+  const valid = h.plugin.updateSettings({ draft: false });
+  await assert.rejects(invalid);
+  await valid;
+  assert.deepEqual(saves, [{ targetFolder: 'posts', draft: false }]);
+  assert.equal(h.plugin.settings.targetFolder, 'posts');
+  assert.equal(h.plugin.settings.draft, false);
 });
 
 test('unloading before layout readiness prevents event registration', async () => {

@@ -30,19 +30,35 @@ export function ShortsFeed({ entries }: { entries: ShortEntry[] }) {
 }
 
 export function ShortsPreview({ entries, total }: { entries: ShortEntry[]; total: number }) {
+  const disclosureRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    if (window.matchMedia('(min-width: 900px)').matches && disclosureRef.current) {
+      disclosureRef.current.open = true;
+    }
+  }, []);
   if (!entries.length) return null;
   return (
     <section className={styles.preview} aria-labelledby="home-shorts-heading">
-      <header className={styles.heading}>
-        <h1 id="home-shorts-heading">
-          짧은 글 <span>{total}</span>
-        </h1>
-        <span className={styles.order}>최신순</span>
-      </header>
-      <ShortEntries entries={entries} preview />
-      <Link to="/shorts" className={styles.readMore} viewTransition>
-        더 읽기 <Icon name="arrow" size={16} className={styles.downArrow} />
-      </Link>
+      <details ref={disclosureRef} className={styles.previewDisclosure}>
+        <summary className={`${styles.heading} ${styles.previewHeading}`}>
+          <h1 id="home-shorts-heading">
+            짧은 글 <span>{total}</span>
+          </h1>
+          <span className={styles.previewAction} aria-hidden="true">
+            <span className={styles.expandLabel}>펼치기</span>
+            <span className={styles.collapseLabel}>접기</span>
+            <Icon name="arrow" size={16} className={styles.disclosureArrow} />
+          </span>
+        </summary>
+        <div className={styles.previewContent}>
+          <div className={styles.previewScroller} role="region" aria-label="최근 짧은 글" tabIndex={0}>
+            <ShortEntries entries={entries} preview />
+          </div>
+          <Link to="/shorts" className={styles.readMore} viewTransition>
+            더 읽기 <Icon name="arrow" size={16} className={styles.downArrow} />
+          </Link>
+        </div>
+      </details>
     </section>
   );
 }

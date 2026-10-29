@@ -31,11 +31,21 @@
   font-variant-numeric: tabular-nums;
 }
 
-.preview { margin-bottom: 44px; }
+.preview { margin-bottom: 32px; }
+.previewHeading { min-height: 48px; cursor: pointer; list-style: none; }
+.previewHeading::-webkit-details-marker { display: none; }
+.previewAction { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.previewHeading:hover .previewAction { color: var(--accent); }
+.disclosureArrow { transform: rotate(90deg); }
+.collapseLabel, .previewDisclosure[open] .expandLabel { display: none; }
+.previewDisclosure[open] .collapseLabel { display: inline; }
+.previewDisclosure[open] .disclosureArrow { transform: rotate(-90deg); }
+.previewContent { display: flex; flex-direction: column; height: max(180px, calc(50svh - var(--home-top-padding, 45px) - 80px)); }
+.previewScroller { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding-inline-end: 8px; }
 .previewFeed .entry { padding-block: 22px; }
 .previewFeed .body img { max-height: 260px; width: auto; object-fit: contain; }
 .previewFeed .linkImage { max-height: 160px; }
-.readMore { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; margin-top: 8px; border-radius: 6px; color: var(--accent); font-size: 13px; font-weight: 550; transition: background-color 150ms ease; }
+.readMore { display: flex; flex: none; align-items: center; justify-content: center; gap: 8px; min-height: 48px; margin-top: 8px; border-radius: 6px; color: var(--accent); font-size: 13px; font-weight: 550; transition: background-color 150ms ease; }
 .readMore:hover { background: var(--accent-soft); }
 .downArrow { transform: rotate(90deg); }
 
@@ -93,6 +103,7 @@
 .body > :first-child > img:first-child { margin-top: 0; }
 .body > :last-child > img:last-child { margin-bottom: 0; }
 .body a { color: var(--accent); text-decoration: underline; }
+.body a + a { margin-inline-start: .35em; }
 .body strong { font-weight: 600; }
 .body :is(ul, ol) { margin: 12px 0; padding-left: 21px; }
 .body li + li { margin-top: 4px; }
@@ -167,6 +178,8 @@
 
 @media (max-width: 899px) {
   .page { max-width: 800px; padding: 28px 32px 42px; }
+  .previewContent { height: auto; }
+  .previewScroller { overflow-y: visible; padding-inline-end: 0; }
 }
 
 @media (max-width: 559px) {

@@ -40,3 +40,7 @@ git worktree remove ../project-search
 > worktree를 제거하는 것과 브랜치를 삭제하는 것은 별개의 작업입니다.
 
 작은 도구의 사용법도 [연결된 기록](../notes/기록.md)으로 남겨두면 다시 찾아보기 편합니다.
+
+### [[작은 기록들을 연결하는 방법|제목으로 연결한 기록]]
+
+참고 자료: [캐시](/posts/http-cache)[수식](/posts/gradient-descent)

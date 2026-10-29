@@ -35,6 +35,37 @@ test('folders, article links, Unicode slugs, and tags navigate correctly', async
   expect(errors).toEqual([]);
 });
 
+test('heading title links retain navigation and permalinks while adjacent prose links stay separate', async ({ page }) => {
+  await page.goto('/posts/git-worktree');
+  await page.evaluate(() => document.fonts.ready);
+  const heading = page.getByRole('heading', { level: 3 }).filter({ hasText: '제목으로 연결한 기록' });
+  const titleLink = heading.getByRole('link', { name: '제목으로 연결한 기록', exact: true });
+  await expect(titleLink).toBeVisible();
+  await expect(titleLink).toHaveCSS('opacity', '1');
+  await expect(titleLink).toHaveAttribute('href', `/posts/${encodeURIComponent('기록을-연결하는-방법')}`);
+
+  const paragraph = page.locator('article p').filter({ hasText: '참고 자료:' });
+  const cache = paragraph.getByRole('link', { name: '캐시', exact: true });
+  const math = paragraph.getByRole('link', { name: '수식', exact: true });
+  await expect(cache).toHaveAttribute('href', '/posts/http-cache');
+  await expect(math).toHaveAttribute('href', '/posts/gradient-descent');
+  const [first, second] = await Promise.all([cache.boundingBox(), math.boundingBox()]);
+  expect(first).not.toBeNull();
+  expect(second).not.toBeNull();
+  expect(second!.x - first!.x - first!.width).toBeGreaterThanOrEqual(3);
+  expect(second!.y).toBe(first!.y);
+
+  const permalink = heading.getByRole('link', { name: '제목으로 연결한 기록 섹션 링크', exact: true });
+  const fragment = await permalink.getAttribute('href');
+  expect(fragment).toMatch(/^#/);
+  await permalink.focus();
+  await expect(permalink).toHaveCSS('opacity', '1');
+  await permalink.click();
+  await expect.poll(() => decodeURIComponent(new URL(page.url()).hash)).toBe(fragment);
+  await titleLink.click();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('작은 기록들을 연결하는 방법');
+});
+
 test('full-text search supports Korean, query URLs, clearing, and empty results', async ({ page }) => {
   await page.goto('/search?q=Cache-Control');
   await expect(page.locator('main').getByRole('link', { name: 'HTTP 캐시를 이해하는 두 가지 질문' })).toBeVisible();

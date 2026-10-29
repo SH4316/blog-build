@@ -99,6 +99,56 @@ test('wiki links resolve filenames, aliases, paths, and Korean heading fragments
   assert.ok(!result.searchIndex.find(item => item.slug === 'start').text.includes('[['));
 });
 
+test('heading wiki links fall back to an exact unique title after a dated filename changes', async t => {
+  const title = 'Artificial Analysis Inteligence Index v5 발표';
+  const root = await fixture(t, {
+    'study/start.md': article('start', `### [[${title}]]\n\n#### [[ ${title.normalize('NFD')}#한글 제목 |표시 이름]]`),
+    [`AI/2026 10 28 ${title}.md`]: article('index-v5', '## 한글 제목').replace('예제 제목', title),
+  });
+  const warnings = [];
+  const { articles } = await buildCatalog(root, { onWarning: message => warnings.push(message) });
+  assert.match(articles.start.html, /<h3[^>]*><a href="\/posts\/index-v5">Artificial Analysis Inteligence Index v5 발표<\/a>/);
+  assert.ok(articles.start.html.includes(`href="/posts/index-v5#${encodeURIComponent('한글-제목')}">표시 이름</a>`));
+  assert.deepEqual(articles.start.toc.map(entry => entry.text), [title, '표시 이름']);
+  assert.deepEqual(warnings, []);
+});
+
+test('existing wiki filenames take priority over title matches and drafts cannot be bypassed', async t => {
+  const root = await fixture(t, {
+    'notes/start.md': article('start', '[[target|파일 링크]] [[draft|초안 링크]]'),
+    'reference/target.md': article('file-target'),
+    '2026 target.md': article('title-target').replace('예제 제목', 'target'),
+    'notes/draft.md': article('file-draft', 'DRAFT_PRIVATE_BODY', 'draft: true'),
+    '2026 draft.md': article('published-title').replace('예제 제목', 'draft'),
+  });
+  const warnings = [];
+  const result = await buildCatalog(root, { onWarning: message => warnings.push(message) });
+  assert.match(result.articles.start.html, /href="\/posts\/file-target">파일 링크<\/a> 초안 링크/);
+  assert.doesNotMatch(result.articles.start.html, /href="\/posts\/(?:title-target|published-title|file-draft)"/);
+  assert.equal(warnings.length, 1);
+  assert.ok(warnings[0].includes('"draft"'));
+  assert.doesNotMatch(JSON.stringify(result), /DRAFT_PRIVATE_BODY/);
+});
+
+test('duplicate titles, draft-only titles, missing names, and explicit paths remain plain text with warnings', async t => {
+  const targets = ['duplicate', 'only-draft', 'missing', 'reference/Path title', 'reference%2FEncoded title'];
+  const root = await fixture(t, {
+    'start.md': article('start', targets.map((target, index) => `### [[${target}|제목 ${index}]]`).join('\n\n')),
+    '2026 first.md': article('first').replace('예제 제목', 'duplicate'),
+    '2026 second.md': article('second').replace('예제 제목', 'duplicate'),
+    '2026 draft.md': article('draft', 'DRAFT_PRIVATE_BODY', 'draft: true').replace('예제 제목', 'only-draft'),
+    '2026 path.md': article('path').replace('예제 제목', 'reference/Path title'),
+    '2026 encoded.md': article('encoded').replace('예제 제목', 'reference%2FEncoded title'),
+  });
+  const warnings = [];
+  const result = await buildCatalog(root, { onWarning: message => warnings.push(message) });
+  assert.doesNotMatch(result.articles.start.html, /href="\/posts\//);
+  assert.deepEqual(result.articles.start.toc.map(entry => entry.text), targets.map((_, index) => `제목 ${index}`));
+  assert.equal(warnings.length, targets.length);
+  for (const target of targets) assert.ok(warnings.some(message => message.includes('start.md:') && message.includes(JSON.stringify(target))));
+  assert.doesNotMatch(JSON.stringify(result), /DRAFT_PRIVATE_BODY/);
+});
+
 test('wiki links prefer a sibling and still reject ambiguous targets and unsupported block links', async t => {
   const files = {
     'one/start.md': article('start', '[[target]]'),

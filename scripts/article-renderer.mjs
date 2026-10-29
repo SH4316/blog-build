@@ -82,6 +82,12 @@ function wikiLinks({ post, allPosts, files, usedAssets, warnMissingArticle }) {
         if (matches.length > 1) throw new Error(`${post.sourcePath}: ambiguous wiki link: ${value}; use a folder path`);
         target = matches[0];
       }
+      // Explicit paths and existing filenames keep their original resolution policy.
+      if (!target && !name.includes('/') && !decoded.includes('/')) {
+        const title = name.normalize('NFC').trim();
+        const matches = allPosts.filter(item => item.title.normalize('NFC') === title);
+        if (matches.length === 1) target = matches[0];
+      }
       if (!target || target.draft) {
         warnMissingArticle(post.sourcePath, value);
         return null;

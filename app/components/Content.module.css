@@ -1,4 +1,4 @@
-.indexPage { width: 100%; max-width: 1056px; margin: 0 auto; padding: 45px 64px 56px; }
+.indexPage { --home-top-padding: 45px; width: 100%; max-width: 1056px; margin: 0 auto; padding: var(--home-top-padding) 64px 56px; }
 .titlePeriod { color: var(--accent); }
 .textLink { display: inline-flex; gap: 9px; align-items: center; color: var(--accent); font-size: 13px; font-weight: 550; }
 .textLink:hover { text-decoration: underline; }
@@ -68,6 +68,7 @@
 .prose h4 { font-size: 16px; margin: 29px 0 13px; }
 .prose a { color: var(--accent); text-decoration: underline; text-decoration-thickness: 1px; }
 .prose a:hover { text-decoration-thickness: 2px; }
+.prose a + a:not(:global(.headingAnchor)) { margin-inline-start: .35em; }
 .prose strong { font-weight: 650; }
 .prose ul, .prose ol { padding-left: 24px; margin: 18px 0 24px; }
 .prose li { padding-left: 4px; margin: 6px 0; }
@@ -126,7 +127,7 @@
 .notFound > svg { color: var(--accent); margin-bottom: 16px; }
 .notFound h1 { font-size: 30px; font-weight: 650; letter-spacing: -.03em; }
 .notFound p { color: var(--muted); margin: 18px 0 28px; }
-@media (min-width: 1600px) { .indexPage { padding-top: 60px; } }
+@media (min-width: 1600px) { .indexPage { --home-top-padding: 60px; } }
 @media (max-width: 1279px) {
   .articlePage { max-width: 860px; padding-inline: 48px; }
   .readingLayout { grid-template-columns: minmax(0, 1fr); gap: 0; }

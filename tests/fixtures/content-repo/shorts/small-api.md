@@ -6,4 +6,6 @@ API를 작게 유지하는 가장 좋은 기준은 **호출하는 코드가 자�
 
 오늘은 옵션 하나를 더하기 전에, 이미 있는 이름을 먼저 고쳤다. 설명할 일이 줄어들면 인터페이스도 조금 더 나아진다.
 
+함께 읽기: [캐시](/posts/http-cache)[수식](/posts/gradient-descent)
+
 ![[posts/web/images/cache-flow.svg|HTTP 캐시 흐름도]]

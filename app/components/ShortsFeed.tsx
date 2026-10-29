@@ -45,9 +45,7 @@ export function ShortsPreview({ entries, total }: { entries: ShortEntry[]; total
             짧은 글 <span>{total}</span>
           </h1>
           <span className={styles.previewAction} aria-hidden="true">
-            <span className={styles.expandLabel}>펼치기</span>
-            <span className={styles.collapseLabel}>접기</span>
-            <Icon name="arrow" size={16} className={styles.disclosureArrow} />
+            <Icon name="chevron" size={20} className={styles.disclosureArrow} />
           </span>
         </summary>
         <div className={styles.previewContent}>

@@ -32,13 +32,11 @@
 }
 
 .preview { margin-bottom: 32px; }
-.previewHeading { min-height: 48px; cursor: pointer; list-style: none; }
+.previewHeading { display: grid; grid-template-columns: minmax(0, 1fr) 44px minmax(0, 1fr); gap: 0; min-height: 48px; cursor: pointer; list-style: none; }
 .previewHeading::-webkit-details-marker { display: none; }
-.previewAction { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
-.previewHeading:hover .previewAction { color: var(--accent); }
+.previewAction { display: grid; grid-column: 2; place-items: center; min-height: 28px; border-radius: 6px; color: var(--accent); }
+.previewHeading:hover .previewAction, .previewHeading:focus-visible .previewAction { background: var(--accent-soft); }
 .disclosureArrow { transform: rotate(90deg); }
-.collapseLabel, .previewDisclosure[open] .expandLabel { display: none; }
-.previewDisclosure[open] .collapseLabel { display: inline; }
 .previewDisclosure[open] .disclosureArrow { transform: rotate(-90deg); }
 .previewContent { display: flex; flex-direction: column; height: max(180px, calc(50svh - var(--home-top-padding, 45px) - 80px)); }
 .previewScroller { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding-inline-end: 8px; }

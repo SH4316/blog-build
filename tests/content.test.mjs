@@ -391,3 +391,56 @@ test('copyable content template renders independently from development fixtures'
   const result = await buildCatalog(path.join(projectDir, 'examples/content-repo'));
   assert.deepEqual(result.catalog.posts.map(post => post.slug), ['hello']);
 });
+
+test('generated article summaries ignore wiki image filenames and aliases while keeping image alt in HTML', async t => {
+  const filename = 'Pasted image 20261028132609.png';
+  const root = await fixture(t, {
+    'summary.md': article('summary', `![[images/${filename}]]\n\n설명에 남겨야 하는 실제 본문입니다.\n\n![[local.png|긴 이미지 대체 텍스트]]`),
+    'local.png': 'local image',
+  });
+  await mkdir(path.join(root, 'images'));
+  await writeFile(path.join(root, 'images', filename), 'root image');
+  const result = await buildCatalog(root);
+  assert.equal(result.articles.summary.description, '설명에 남겨야 하는 실제 본문입니다.');
+  assert.equal(result.catalog.posts[0].description, '설명에 남겨야 하는 실제 본문입니다.');
+  assert.equal(result.searchIndex[0].text, '설명에 남겨야 하는 실제 본문입니다.');
+  assert.doesNotMatch(result.articles.summary.description, /Pasted image|local.png|대체 텍스트/);
+  assert.ok(result.articles.summary.html.includes(`alt="${filename}"`));
+  assert.match(result.articles.summary.html, /alt="긴 이미지 대체 텍스트"/);
+});
+
+test('Markdown and reference image labels do not become descriptions, search text, or reading-length input', async t => {
+  const root = await fixture(t, {
+    'summary.md': article('summary', `![${'image-label '.repeat(200)}](chart.png)\n\n![reference-file-name.png][chart]\n\n짧은 본문만 읽기 시간에 반영합니다.\n\n[chart]: chart.png`),
+    'only-image.md': article('only-image', '![standalone-file-name.png](chart.png)'),
+    'chart.png': 'image',
+  });
+  const result = await buildCatalog(root);
+  assert.equal(result.articles.summary.description, '짧은 본문만 읽기 시간에 반영합니다.');
+  assert.equal(result.searchIndex.find(post => post.slug === 'summary').text, '짧은 본문만 읽기 시간에 반영합니다.');
+  assert.equal(result.articles.summary.readingMinutes, 1);
+  assert.match(result.articles.summary.html, /alt="image-label /);
+  assert.match(result.articles.summary.html, /alt="reference-file-name.png"/);
+  assert.equal(result.articles['only-image'].description, '');
+  assert.equal(result.catalog.posts.find(post => post.slug === 'only-image').description, '');
+  assert.equal(result.searchIndex.find(post => post.slug === 'only-image').text, '');
+  assert.equal(result.articles['only-image'].readingMinutes, 1);
+  assert.match(result.articles['only-image'].html, /alt="standalone-file-name.png"/);
+});
+
+test('author descriptions and ordinary prose or inline-code filenames are preserved', async t => {
+  const explicit = 'Pasted image 20261028132609.png를 직접 설명한 소개입니다.';
+  const root = await fixture(t, {
+    'explicit.md': article('explicit', '![image-only-label.png](picture.png)\n\n직접 작성한 본문입니다.', `description: ${JSON.stringify(explicit)}`),
+    'prose.md': article('prose', 'Pasted image 20261028132609.png는 본문에서 설명하는 파일입니다. `screenshot.png`도 그대로 남깁니다.\n\n![hidden-image-label.png](picture.png)'),
+    'picture.png': 'image',
+  });
+  const result = await buildCatalog(root);
+  assert.equal(result.articles.explicit.description, explicit);
+  assert.equal(result.catalog.posts.find(post => post.slug === 'explicit').description, explicit);
+  for (const text of [result.articles.prose.description, result.searchIndex.find(post => post.slug === 'prose').text]) {
+    assert.match(text, /Pasted image 20261028132609.png/);
+    assert.match(text, /screenshot.png/);
+    assert.doesNotMatch(text, /hidden-image-label.png/);
+  }
+});

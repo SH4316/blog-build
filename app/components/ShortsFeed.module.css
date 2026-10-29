@@ -31,6 +31,14 @@
   font-variant-numeric: tabular-nums;
 }
 
+.preview { margin-bottom: 44px; }
+.previewFeed .entry { padding-block: 22px; }
+.previewFeed .body img { max-height: 260px; width: auto; object-fit: contain; }
+.previewFeed .linkImage { max-height: 160px; }
+.readMore { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; margin-top: 8px; border-radius: 6px; color: var(--accent); font-size: 13px; font-weight: 550; transition: background-color 150ms ease; }
+.readMore:hover { background: var(--accent-soft); }
+.downArrow { transform: rotate(90deg); }
+
 .feed {
   list-style: none;
   margin: 0;
@@ -81,6 +89,9 @@
 .body > :first-child { margin-top: 0; }
 .body > :last-child { margin-bottom: 0; }
 .body p { margin: 0 0 12px; }
+.body img { display: block; max-width: 100%; height: auto; margin: 12px 0; border: 1px solid var(--border); border-radius: 8px; }
+.body > :first-child > img:first-child { margin-top: 0; }
+.body > :last-child > img:last-child { margin-bottom: 0; }
 .body a { color: var(--accent); text-decoration: underline; }
 .body strong { font-weight: 600; }
 .body :is(ul, ol) { margin: 12px 0; padding-left: 21px; }
@@ -161,6 +172,9 @@
 @media (max-width: 559px) {
   .page { padding: 24px 22px 36px; }
   .heading h1 { font-size: 18px; }
+  .preview { margin-bottom: 32px; }
+  .previewFeed .entry { padding-block: 20px; }
+  .previewFeed .body img { max-height: 220px; }
   .entry { grid-template-columns: 30px minmax(0, 1fr); gap: 12px; padding-block: 24px; }
   .avatar { width: 30px; height: 30px; }
   .byline { gap: 4px 10px; }

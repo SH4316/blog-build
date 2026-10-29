@@ -42,6 +42,58 @@ test('short feed is reachable through desktop and mobile navigation', async ({ p
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('짧은 글 5');
 });
 
+test('home shows the latest three shorts and opens the full feed with normal or reduced motion', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+    await page.emulateMedia({ reducedMotion });
+    await page.goto('/');
+    const section = page.locator('section[aria-labelledby="home-shorts-heading"]');
+    const entries = section.getByRole('list', { name: '최근 짧은 글 목록', exact: true }).locator('article');
+    await expect(entries).toHaveCount(3);
+    await expect(section.getByRole('heading', { level: 1 })).toHaveText('짧은 글 5');
+    await expect(page.getByRole('heading', { level: 2, name: /최근 글/ })).toBeVisible();
+    expect(await entries.locator('time').evaluateAll(times => times.map(time => time.getAttribute('datetime')))).toEqual([
+      '2026-10-28T17:30:00+09:00', '2026-10-27T12:10:00+09:00', '2026-10-26',
+    ]);
+    const dateLink = entries.first().getByRole('link', { name: /글 링크$/ });
+    const destination = await dateLink.getAttribute('href');
+    expect(destination).toMatch(/^\/shorts#short-/);
+    const more = section.getByRole('link', { name: '더 읽기', exact: true });
+    await expect(more).toHaveAttribute('href', '/shorts');
+    await more.click();
+    await expect(page).toHaveURL(/\/shorts$/);
+    await expect(page.getByRole('list', { name: '짧은 글 목록', exact: true }).locator('article')).toHaveCount(5);
+    await page.goBack();
+    await expect(entries).toHaveCount(3);
+    await entries.first().getByRole('link', { name: /글 링크$/ }).click();
+    await expect(page).toHaveURL(new RegExp(`${destination}$`));
+    await expect(page.getByRole('list', { name: '짧은 글 목록', exact: true }).locator('article')).toHaveCount(5);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  }
+  expect(errors).toEqual([]);
+});
+
+test('short body images load from local static assets and remain in prerendered HTML', async ({ page, request }) => {
+  await page.goto('/shorts');
+  const image = page.getByRole('list', { name: '짧은 글 목록', exact: true }).getByRole('img', { name: 'HTTP 캐시 흐름도', exact: true });
+  await expect(image).toBeVisible();
+  await image.scrollIntoViewIfNeeded();
+  await expect.poll(() => image.evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  await expect(image).toHaveAttribute('src', '/content-assets/web/images/cache-flow.svg');
+  await expect(image).toHaveAttribute('loading', 'lazy');
+  await expect(image).toHaveAttribute('decoding', 'async');
+  const asset = await request.get('/content-assets/web/images/cache-flow.svg');
+  expect(asset.status()).toBe(200);
+  expect(asset.headers()['content-type']).toContain('image/svg+xml');
+  expect(await asset.text()).toContain('<svg');
+  const staticFeed = await (await request.get('/shorts')).text();
+  expect(staticFeed).toContain('src="/content-assets/web/images/cache-flow.svg" alt="HTTP 캐시 흐름도"');
+  const staticHome = await (await request.get('/')).text();
+  expect(staticHome).toContain('src="/content-assets/web/images/cache-flow.svg" alt="HTTP 캐시 흐름도"');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
 test('build-time previews show local images, metadata fallbacks, and recover from a failed image', async ({ page, request }) => {
   const externalRequests: string[] = [];
   page.on('request', event => { if (new URL(event.url()).hostname !== '127.0.0.1') externalRequests.push(event.url()); });

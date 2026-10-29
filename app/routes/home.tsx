@@ -1,20 +1,23 @@
-import { Link, useRouteLoaderData } from 'react-router';
-import type { RootData } from '~/root';
+import { Link, useLoaderData } from 'react-router';
 import { PostSection } from '~/components/PostList';
+import { ShortsPreview } from '~/components/ShortsFeed';
 import { Icon } from '~/components/Icon';
+import { getHomeContent } from '~/lib/content.server';
 import { pageMeta, site } from '~/lib/site';
 import styles from '~/components/Content.module.css';
 
 export const meta = () => pageMeta(site.title, site.description, '/');
+export const loader = () => getHomeContent();
 export default function Home() {
-  const catalog = useRouteLoaderData<RootData>('root')!;
+  const { posts, shorts, totalShorts } = useLoaderData<typeof loader>();
   return (
     <div className={styles.indexPage}>
+      <ShortsPreview entries={shorts} total={totalShorts} />
       <section aria-labelledby="recent-heading">
         <PostSection
-          posts={catalog.posts}
+          posts={posts}
           title="최근 글"
-          headingLevel={1}
+          headingLevel={shorts.length ? 2 : 1}
           headingId="recent-heading"
           groupByYear
           actions={

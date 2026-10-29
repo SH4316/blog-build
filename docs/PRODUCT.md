@@ -19,6 +19,10 @@ Application code and public Markdown content live in separate GitHub repositorie
 
 Short posts are authored as individual Markdown files in the content repository’s `shorts/` directory, including through the Obsidian plugin’s “새 짧은 글” command. The `/shorts` page displays their text and optional external links in a newest-first vertical feed, without separate article pages. Link previews use the destination’s title, description and representative image when available, with an author-supplied title taking priority and ordinary links as the fallback. This collection is independent of the article folder tree, tags and article search. Dates provide stable in-page references; an absent `shorts/` directory produces an empty feed.
 
+Short-post bodies also support local Markdown images and Obsidian image embeds from the content repository. Referenced images are copied into the static build and displayed at their full aspect ratio, including image-only posts. Draft and unreferenced images are excluded from deployment.
+
+The home page previews the three latest published short posts above regular articles. A “더 읽기” link with a downward arrow opens the full feed with a brief native page transition; reduced-motion preferences and browsers without transition support retain normal navigation. Automatic article descriptions omit image filenames and references while preserving explicitly written descriptions.
+
 ## Capabilities and Constraints
 Include nested folder navigation, latest articles, tags, browser-side full-text search, article table of contents, syntax highlighting, inline and display math, Mermaid diagrams, light/dark themes, and SEO. The desktop layout has a left folder tree, a central reading column, and a right table of contents. Mobile navigation opens as a menu. The content repository has not been created yet; provide a copyable template and local sample content. Production must require an explicitly configured content repository.
 

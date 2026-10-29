@@ -21,6 +21,12 @@ async function fixture(t, files = {}) {
   return root;
 }
 
+async function attachment(root, relative, content = 'local image bytes') {
+  const target = path.join(root, relative);
+  await mkdir(path.dirname(target), { recursive: true });
+  await writeFile(target, content);
+}
+
 test('short frontmatter requires only a date and a nonempty body or link', () => {
   const short = parseShort(note('본문의 **강조**'), '메모.md');
   assert.equal(short.date, '2026-10-28');
@@ -131,7 +137,7 @@ test('a missing shorts folder is compatible with existing content; symlinks fail
 
 test('sanitized empty prose needs a link, while link-only entries are supported', async t => {
   const empty = await fixture(t, { 'empty.md': note('<script>alert(1)</script>') });
-  await assert.rejects(buildShorts(empty), /nonempty text body or link/);
+  await assert.rejects(buildShorts(empty), /nonempty text body, local image, or link/);
   const linkOnly = await fixture(t, { 'link.md': note('', 'link: "https://example.com"') });
   const [entry] = await buildShorts(linkOnly);
   assert.equal(entry.html, '');
@@ -165,4 +171,172 @@ test('short entries generate separately from articles, folders, search, and per-
   const existing = await buildCatalog(await fixture(t));
   await writeContent(existing, output);
   assert.deepEqual(JSON.parse(await readFile(path.join(output, 'app/generated/shorts.json'), 'utf8')), []);
+});
+
+test('short wiki images resolve all three roots with aliases, dimensions, and encoded filenames', async t => {
+  const filename = '한글 # 그림.png';
+  const encoded = encodeURIComponent(filename);
+  const root = await fixture(t, {
+    'notes/start.md': note(`![[images/${encoded}?version=1#crop|그림 설명]]\n\n![[posts/images/shared.webp|300x200]]\n\n![[shorts/notes/local.svg|120]]`),
+    'notes/local.svg': '<svg/>',
+  });
+  await attachment(root, `images/${filename}`, 'root image');
+  await attachment(root, 'posts/images/shared.webp', 'posts image');
+  const files = new Set([`images/${filename}`, 'posts/images/shared.webp', 'shorts/notes/local.svg']);
+  const usedAssets = new Set();
+  const [entry] = await buildShorts(root, { files, usedAssets });
+  assert.ok(entry.html.includes(`src="/content-images/${encoded}?version=1#crop" alt="그림 설명"`));
+  assert.match(entry.html, /src="\/content-assets\/images\/shared.webp" alt="shared.webp" width="300" height="200"/);
+  assert.match(entry.html, /src="\/short-assets\/notes\/local.svg" alt="local.svg" width="120"/);
+  assert.equal((entry.html.match(/loading="lazy" decoding="async"/g) || []).length, 3);
+  assert.deepEqual([...usedAssets].sort(), [...files].sort());
+  assert.doesNotMatch(entry.html, /!\[\[/);
+});
+
+test('standalone short inventory prefers a sibling and requires a unique global image match', async t => {
+  const root = await fixture(t, { 'notes/start.md': note('![[shared.png]]'), 'notes/shared.png': 'near' });
+  await attachment(root, 'images/shared.png', 'root image');
+  await attachment(root, 'posts/shared.png', 'posts image');
+  assert.match((await buildShorts(root))[0].html, /src="\/short-assets\/notes\/shared.png"/);
+  await rm(path.join(root, 'shorts/notes/shared.png'));
+  await assert.rejects(buildShorts(root), /shorts\/notes\/start.md:.*ambiguous.*image/i);
+  await rm(path.join(root, 'posts/shared.png'));
+  assert.match((await buildShorts(root))[0].html, /src="\/content-images\/shared.png"/);
+  await writeFile(path.join(root, 'shorts/notes/start.md'), note('![[missing.PNG]]'));
+  await assert.rejects(buildShorts(root), /shorts\/notes\/start.md:.*image.*(?:exist|missing)/i);
+});
+
+test('Markdown images use source-relative paths and explicit roots while preserving surrounding links', async t => {
+  const rootName = '한글 그림.png';
+  const root = await fixture(t, {
+    'notes/start.md': note(`[![로컬 그림](local.png)](https://example.com/reference)\n\n![상대 루트](../../images/${encodeURIComponent(rootName)}?v=1#crop)\n\n![명시 루트](/images/${encodeURIComponent(rootName)})\n\n![하위 폴더](images/near.png)\n\n[위키 예시 ![[missing.png]]](https://example.com/example)`),
+    'notes/local.png': 'local image',
+    'notes/images/near.png': 'relative nested image',
+  });
+  await attachment(root, `images/${rootName}`, 'root image');
+  const usedAssets = new Set();
+  const [entry] = await buildShorts(root, { usedAssets });
+  assert.match(entry.html, /href="https:\/\/example.com\/reference"><img src="\/short-assets\/notes\/local.png" alt="로컬 그림"/);
+  assert.ok(entry.html.includes(`src="/content-images/${encodeURIComponent(rootName)}?v=1#crop"`));
+  assert.ok(entry.html.includes(`src="/content-images/${encodeURIComponent(rootName)}" alt="명시 루트"`));
+  assert.match(entry.html, /src="\/short-assets\/notes\/images\/near.png"/);
+  assert.match(entry.html, /href="https:\/\/example.com\/example">위키 예시 !\[\[missing.png\]\]/);
+  assert.equal((entry.html.match(/<img /g) || []).length, 4);
+  assert.deepEqual([...usedAssets].sort(), [`images/${rootName}`, 'shorts/notes/images/near.png', 'shorts/notes/local.png'].sort());
+});
+
+test('escaped and code wiki examples retain their positions beside identical real short images', async t => {
+  const root = await fixture(t, {
+    'start.md': note('\\!\\[\\[picture.png\\]\\] ![[picture.png]] &#33;[[picture.png]] ![[picture.png]]\n\n`![[missing.png]]`\n\n```markdown\n![[missing.png]]\n```\n\n![[document]]'),
+    'picture.png': 'image bytes',
+  });
+  const usedAssets = new Set();
+  const [entry] = await buildShorts(root, { usedAssets });
+  assert.equal((entry.html.match(/<img /g) || []).length, 2);
+  assert.equal((entry.html.match(/!\[\[picture.png\]\]/g) || []).length, 2);
+  assert.match(entry.html, /<p>!\[\[picture.png\]\] <img/);
+  assert.match(entry.html, /<code>!\[\[missing.png\]\]<\/code>/);
+  assert.match(entry.html, /<pre><code[^>]*>!\[\[missing.png\]\]/);
+  assert.match(entry.html, /!\[\[document\]\]/);
+  assert.deepEqual([...usedAssets], ['shorts/picture.png']);
+});
+
+test('first-line indented wiki and Markdown image code stays literal without resolving assets', async t => {
+  const root = await fixture(t, {
+    'indented.md': note('    ![[missing.png]]\n\n    ![missing](missing.png)'),
+  });
+  const usedAssets = new Set();
+  const [entry] = await buildShorts(root, { usedAssets });
+  assert.match(entry.html, /<pre><code>!\[\[missing.png\]\]/);
+  assert.match(entry.html, /!\[missing\]\(missing.png\)/);
+  assert.doesNotMatch(entry.html, /<img/);
+  assert.deepEqual([...usedAssets], []);
+});
+
+test('short images reject missing, hidden, malformed, and escaping local paths with source context', async t => {
+  const root = await fixture(t, { 'unsafe.md': note('본문') });
+  for (const body of [
+    '![[missing.png]]', '![없음](missing.png)', '![[../../outside.png]]', '![[shorts/../../outside.png]]',
+    '![[images/.private.png]]', '![[images/%2Eprivate.png]]', '![[bad%5Cname.png]]', '![[bad%00name.png]]', '![[bad%ZZ.png]]',
+    '![밖](../../outside.png)', '![인코딩 밖](%2E%2E/%2E%2E/outside.png)', '![숨김](../images/%2Eprivate.png)',
+    '![역슬래시](bad%5Cname.png)', '![널](bad%00name.png)', '![잘못된 인코딩](bad%ZZ.png)',
+    '![허위 생성 경로](/short-assets/missing.png)', '![숨김 생성 경로](/content-images/%2Eprivate.png)',
+    '![생성 경로 탈출](/short-assets/%2E%2E/%2E%2E/outside.png)',
+  ]) {
+    await writeFile(path.join(root, 'shorts/unsafe.md'), note(body));
+    await assert.rejects(buildShorts(root), /shorts\/unsafe.md:/, body);
+  }
+});
+
+test('standalone short inventory rejects symlinked image roots and attachments', async t => {
+  const root = await fixture(t, { 'start.md': note('![[images/picture.png]]') });
+  const outside = await fixture(t, { 'picture.png': 'outside image' });
+  await symlink(path.join(outside, 'shorts'), path.join(root, 'images'));
+  await assert.rejects(buildShorts(root), /symbolic links are not supported/i);
+  await rm(path.join(root, 'images'));
+  await mkdir(path.join(root, 'images'));
+  await symlink(path.join(outside, 'shorts/picture.png'), path.join(root, 'images/picture.png'));
+  await assert.rejects(buildShorts(root), /symbolic links are not supported/i);
+});
+
+test('image-only shorts require a validated local image, and drafts skip missing image resolution', async t => {
+  const root = await fixture(t, {
+    'image.md': note('![[picture.png]]'),
+    'picture.png': 'local image',
+    'draft.md': note('![[missing.png]]', 'draft: true'),
+  });
+  const usedAssets = new Set();
+  const entries = await buildShorts(root, { usedAssets });
+  assert.equal(entries.length, 1);
+  assert.match(entries[0].html, /<img src="\/short-assets\/picture.png"/);
+  assert.deepEqual([...usedAssets], ['shorts/picture.png']);
+  await writeFile(path.join(root, 'shorts/image.md'), note('![원격](https://example.com/tracker.png)'));
+  await assert.rejects(buildShorts(root), /nonempty.*(?:body|image).*link/i);
+  await writeFile(path.join(root, 'shorts/image.md'), note('본문 ![원격](https://example.com/tracker.png) ![데이터](data:image/png;base64,AAAA) ![상대 프로토콜](//example.com/tracker.png)'));
+  const nextAssets = new Set();
+  const [entry] = await buildShorts(root, { usedAssets: nextAssets });
+  assert.doesNotMatch(entry.html, /<img/);
+  assert.deepEqual([...nextAssets], []);
+});
+
+test('only published short image references copy to distinct roots and deleted assets are cleaned', async t => {
+  const root = await fixture(t, {
+    'public.md': note('![[images/same.png]]\n\n![[posts/images/same.png]]\n\n![[shorts/images/same.png]]'),
+    'images/same.png': 'short image',
+    'unused.png': 'unused short image',
+    'private.png': 'draft short image',
+    'draft.md': note('![[images/private.png]] ![[shorts/private.png]] ![[missing.png]]', 'draft: true'),
+  });
+  await attachment(root, 'images/same.png', 'root image');
+  await attachment(root, 'images/private.png', 'draft root image');
+  await attachment(root, 'posts/images/same.png', 'posts image');
+  const output = await mkdtemp(path.join(tmpdir(), 'soohyuk-short-image-output-'));
+  t.after(() => rm(output, { recursive: true, force: true }));
+  await attachment(output, '.cache/public/short-assets/old.png', 'stale image');
+  const result = await buildCatalog(root);
+  assert.equal(result.shorts.length, 1);
+  assert.deepEqual(result.usedAssets.sort(), ['images/same.png', 'posts/images/same.png', 'shorts/images/same.png'].sort());
+  await writeContent(result, output);
+  for (const [file, expected] of [['content-images/same.png', 'root image'], ['content-assets/images/same.png', 'posts image'], ['short-assets/images/same.png', 'short image']]) {
+    assert.equal(await readFile(path.join(output, '.cache/public', file), 'utf8'), expected);
+  }
+  for (const file of ['short-assets/old.png', 'short-assets/unused.png', 'short-assets/private.png', 'content-images/private.png']) {
+    await assert.rejects(readFile(path.join(output, '.cache/public', file)), { code: 'ENOENT' });
+  }
+  await rm(path.join(root, 'shorts/public.md'));
+  await writeContent(await buildCatalog(root), output);
+  for (const file of ['content-images/same.png', 'content-assets/images/same.png', 'short-assets/images/same.png']) {
+    await assert.rejects(readFile(path.join(output, '.cache/public', file)), { code: 'ENOENT' });
+  }
+});
+
+test('new short attachments do not change ordinary article image lookup scope', async t => {
+  const root = await fixture(t, { 'shared.png': 'short image' });
+  await attachment(root, 'posts/article.md', '---\ntitle: "일반 글"\nslug: "article"\ndate: "2026-10-28"\n---\n![[shared.png]]');
+  await attachment(root, 'images/shared.png', 'root image');
+  const result = await buildCatalog(root);
+  assert.match(result.articles.article.html, /src="\/content-images\/shared.png"/);
+  assert.deepEqual(result.usedAssets, ['images/shared.png']);
+  await rm(path.join(root, 'images/shared.png'));
+  await assert.rejects(buildCatalog(root), /article.md:.*local image does not exist/);
 });

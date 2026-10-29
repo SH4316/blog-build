@@ -5,6 +5,10 @@ import type { Article, Catalog, ShortEntry } from './types';
 
 export const getCatalog = () => catalog as Catalog;
 export const getShorts = () => shorts as ShortEntry[];
+export function getHomeContent() {
+  const entries = getShorts();
+  return { posts: getCatalog().posts, shorts: entries.slice(0, 3), totalShorts: entries.length };
+}
 export function getArticle(slug: string) {
   const article = Object.hasOwn(articles, slug)
     ? (articles as Record<string, Article>)[slug]

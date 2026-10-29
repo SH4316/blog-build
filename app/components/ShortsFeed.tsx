@@ -15,71 +15,7 @@ export function ShortsFeed({ entries }: { entries: ShortEntry[] }) {
         {entries.length > 0 && <span className={styles.order}>최신순</span>}
       </header>
       {entries.length > 0 ? (
-        <ol className={styles.feed} aria-label="짧은 글 목록">
-          {entries.map((entry) => {
-            const published = formatShortDate(entry.date);
-            return (
-              <li key={entry.id}>
-                <article
-                  id={entry.id}
-                  className={styles.entry}
-                  aria-label={`${published.title} 짧은 글`}
-                >
-                  <img
-                    className={styles.avatar}
-                    src="/github-avatar.png"
-                    alt=""
-                    width={34}
-                    height={34}
-                    loading="lazy"
-                    decoding="async"
-                  />
-                  <div className={styles.content}>
-                    <header className={styles.byline}>
-                      <span className={styles.author}>Soohyuk</span>
-                      <a
-                        className={styles.date}
-                        href={`#${entry.id}`}
-                        aria-label={`${published.label} 글 링크`}
-                        title={published.title}
-                      >
-                        <time dateTime={published.dateTime}>{published.label}</time>
-                      </a>
-                    </header>
-                    {entry.html && (
-                      <div className={styles.body} dangerouslySetInnerHTML={{ __html: entry.html }} />
-                    )}
-                    {entry.link && (
-                      <a
-                        className={styles.link}
-                        href={entry.link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        {entry.preview?.image && (
-                          <PreviewImage key={entry.preview.image} source={entry.preview.image} />
-                        )}
-                        <span className={styles.linkDetails}>
-                          <span className={styles.linkHost}>
-                            {entry.linkHost}
-                            <Icon name="external" size={14} />
-                          </span>
-                          <span className={styles.linkTitle}>
-                            {entry.linkTitle || entry.preview?.title || entry.link}
-                          </span>
-                          {entry.preview?.description && (
-                            <span className={styles.linkDescription}>{entry.preview.description}</span>
-                          )}
-                        </span>
-                        <span className="srOnly"> (새 탭)</span>
-                      </a>
-                    )}
-                  </div>
-                </article>
-              </li>
-            );
-          })}
-        </ol>
+        <ShortEntries entries={entries} />
       ) : (
         <section className={styles.empty} aria-label="짧은 글 없음">
           <Icon name="note" size={28} />
@@ -90,6 +26,98 @@ export function ShortsFeed({ entries }: { entries: ShortEntry[] }) {
         </section>
       )}
     </div>
+  );
+}
+
+export function ShortsPreview({ entries, total }: { entries: ShortEntry[]; total: number }) {
+  if (!entries.length) return null;
+  return (
+    <section className={styles.preview} aria-labelledby="home-shorts-heading">
+      <header className={styles.heading}>
+        <h1 id="home-shorts-heading">
+          짧은 글 <span>{total}</span>
+        </h1>
+        <span className={styles.order}>최신순</span>
+      </header>
+      <ShortEntries entries={entries} preview />
+      <Link to="/shorts" className={styles.readMore} viewTransition>
+        더 읽기 <Icon name="arrow" size={16} className={styles.downArrow} />
+      </Link>
+    </section>
+  );
+}
+
+function ShortEntries({ entries, preview = false }: { entries: ShortEntry[]; preview?: boolean }) {
+  return (
+    <ol
+      className={`${styles.feed} ${preview ? styles.previewFeed : ''}`}
+      aria-label={preview ? '최근 짧은 글 목록' : '짧은 글 목록'}
+    >
+      {entries.map((entry) => {
+        const published = formatShortDate(entry.date);
+        return (
+          <li key={entry.id}>
+            <article
+              id={entry.id}
+              className={styles.entry}
+              aria-label={`${published.title} 짧은 글`}
+            >
+              <img
+                className={styles.avatar}
+                src="/github-avatar.png"
+                alt=""
+                width={34}
+                height={34}
+                loading="lazy"
+                decoding="async"
+              />
+              <div className={styles.content}>
+                <header className={styles.byline}>
+                  <span className={styles.author}>Soohyuk</span>
+                  <Link
+                    className={styles.date}
+                    to={preview ? `/shorts#${entry.id}` : `#${entry.id}`}
+                    viewTransition={preview}
+                    aria-label={`${published.label} 글 링크`}
+                    title={published.title}
+                  >
+                    <time dateTime={published.dateTime}>{published.label}</time>
+                  </Link>
+                </header>
+                {entry.html && (
+                  <div className={styles.body} dangerouslySetInnerHTML={{ __html: entry.html }} />
+                )}
+                {entry.link && (
+                  <a
+                    className={styles.link}
+                    href={entry.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {entry.preview?.image && (
+                      <PreviewImage key={entry.preview.image} source={entry.preview.image} />
+                    )}
+                    <span className={styles.linkDetails}>
+                      <span className={styles.linkHost}>
+                        {entry.linkHost}
+                        <Icon name="external" size={14} />
+                      </span>
+                      <span className={styles.linkTitle}>
+                        {entry.linkTitle || entry.preview?.title || entry.link}
+                      </span>
+                      {entry.preview?.description && (
+                        <span className={styles.linkDescription}>{entry.preview.description}</span>
+                      )}
+                    </span>
+                    <span className="srOnly"> (새 탭)</span>
+                  </a>
+                )}
+              </div>
+            </article>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 

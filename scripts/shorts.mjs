@@ -7,11 +7,11 @@ import remarkGfm from 'remark-gfm';
 import remarkRehype from 'remark-rehype';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import rehypeStringify from 'rehype-stringify';
-import { visit } from 'unist-util-visit';
+import { SKIP, visit } from 'unist-util-visit';
+import { imageExtension, localImageFiles, shortImagePath, textSourceOffsets, wikiImage } from './local-images.mjs';
 
 const shortSchema = {
   ...defaultSchema,
-  tagNames: defaultSchema.tagNames.filter(tag => tag !== 'img'),
   protocols: { ...defaultSchema.protocols, href: ['http', 'https'] },
 };
 
@@ -53,8 +53,9 @@ export function parseShort(raw, sourcePath) {
   if (metadata.linkTitle !== undefined && typeof metadata.linkTitle !== 'string') throw new Error(`${source}: linkTitle must be a string`);
   const link = metadata.link === undefined ? { link: null, linkHost: null } : externalLink(metadata.link, source);
   if (metadata.linkTitle !== undefined && !link.link) throw new Error(`${source}: linkTitle requires a link`);
-  const body = normalized.slice(match[0].length).trim();
-  if (!body && !link.link && metadata.draft !== true) throw new Error(`${source}: a nonempty body or link is required`);
+  // Keep Markdown indentation and hard line breaks; only remove blank edge lines.
+  const body = normalized.slice(match[0].length).replace(/^\n+|\n+$/g, '');
+  if (!body.trim() && !link.link && metadata.draft !== true) throw new Error(`${source}: a nonempty body or link is required`);
   return {
     id: `short-${Buffer.from(sourcePath, 'utf8').toString('hex')}`,
     date: validDate(metadata.date, source),
@@ -74,7 +75,7 @@ async function shortFiles(directory, prefix = '') {
     const relative = `${prefix}${entry.name}`;
     if (entry.isSymbolicLink()) throw new Error(`shorts/${relative}: symbolic links are not supported`);
     if (entry.isDirectory()) files.push(...await shortFiles(path.join(directory, entry.name), `${relative}/`));
-    else if (entry.isFile() && /\.md$/i.test(entry.name)) files.push(relative);
+    else if (entry.isFile()) files.push(relative);
   }
   return files.sort();
 }
@@ -91,20 +92,76 @@ function safeShortLinks() {
   });
 }
 
-export async function buildShorts(rootDirectory, { previewResolver = null } = {}) {
+function shortWikiImages(short, files, usedAssets) {
+  return () => tree => {
+    function transform(parent) {
+      if (!parent.children || ['link', 'linkReference'].includes(parent.type)) return;
+      parent.children = parent.children.flatMap(node => {
+        if (node.type !== 'text') { transform(node); return [node]; }
+        const original = short.body.slice(node.position.start.offset, node.position.end.offset);
+        const offsets = textSourceOffsets(original);
+        const parts = [];
+        let cursor = 0;
+        for (const match of node.value.matchAll(/!\[\[([^\[\]\n]+)\]\]/g)) {
+          if (original.slice(offsets[match.index], offsets[match.index + match[0].length]) !== match[0]) continue;
+          const [destination, ...aliases] = match[1].split('|');
+          if (!imageExtension.test(destination.trim().split(/[?#]/)[0])) continue;
+          parts.push({ type: 'text', value: node.value.slice(cursor, match.index) });
+          parts.push(wikiImage(destination.trim(), aliases.join('|'), {
+            sourcePath: `shorts/${short.sourcePath}`, folder: path.posix.dirname(short.sourcePath), scope: 'shorts', files, usedAssets,
+          }));
+          cursor = match.index + match[0].length;
+        }
+        if (!cursor) return [node];
+        parts.push({ type: 'text', value: node.value.slice(cursor) });
+        return parts;
+      });
+    }
+    transform(tree);
+  };
+}
+
+function shortLocalImages(short, files, usedAssets) {
+  return () => tree => visit(tree, 'element', (node, index, parent) => {
+    if (node.tagName !== 'img') return;
+    const value = node.properties?.src;
+    // Only local body images are published; remote/data images stay disabled.
+    if (typeof value !== 'string' || !value || /^(?:[a-z][a-z\d+.-]*:|\/\/|#|\?)/i.test(value)) {
+      parent.children.splice(index, 1);
+      return [SKIP, index];
+    }
+    // Resolve generated wiki URLs through the same inventory check as authored URLs.
+    const assetRoots = { '/content-images/': '/images/', '/content-assets/': '/posts/', '/short-assets/': '/shorts/' };
+    const prefix = Object.keys(assetRoots).find(prefix => value.startsWith(prefix));
+    const local = prefix ? `${assetRoots[prefix]}${value.slice(prefix.length)}` : value;
+    node.properties.src = shortImagePath(local, {
+      sourcePath: `shorts/${short.sourcePath}`, folder: path.posix.dirname(short.sourcePath), files, usedAssets,
+    });
+  });
+}
+
+export async function buildShorts(rootDirectory, { previewResolver = null, files: sharedFiles = null, usedAssets = new Set() } = {}) {
   const directory = path.join(rootDirectory, 'shorts');
   let files;
   try { files = await shortFiles(directory); }
   catch (error) { if (error.code === 'ENOENT') return []; throw error; }
-  const parsed = await Promise.all(files.map(async file => parseShort(await readFile(path.join(directory, file), 'utf8'), file)));
+  const imageFiles = sharedFiles || new Set([
+    ...files.filter(file => imageExtension.test(file)).map(file => `shorts/${file}`),
+    ...await localImageFiles(rootDirectory),
+  ]);
+  const parsed = await Promise.all(files.filter(file => /\.md$/i.test(file)).map(async file => parseShort(await readFile(path.join(directory, file), 'utf8'), file)));
   const timestamp = date => Date.parse(date.includes('T') ? date : `${date}T00:00:00+09:00`);
   parsed.sort((a, b) => timestamp(b.date) - timestamp(a.date) || (a.sourcePath < b.sourcePath ? -1 : a.sourcePath > b.sourcePath ? 1 : 0));
   const entries = [];
   for (const short of parsed.filter(entry => !entry.draft)) {
-    const result = await unified().use(remarkParse).use(remarkGfm).use(remarkRehype)
-      .use(rehypeSanitize, shortSchema).use(safeShortLinks).use(rehypeStringify).process(short.body);
+    let hasImage = false;
+    const result = await unified().use(remarkParse).use(remarkGfm).use(shortWikiImages(short, imageFiles, usedAssets)).use(remarkRehype)
+      .use(shortLocalImages(short, imageFiles, usedAssets)).use(rehypeSanitize, shortSchema).use(safeShortLinks)
+      .use(() => tree => visit(tree, 'element', node => {
+        if (node.tagName === 'img') { hasImage = true; node.properties.loading = 'lazy'; node.properties.decoding = 'async'; }
+      })).use(rehypeStringify).process(short.body);
     const html = String(result);
-    if (!short.link && !html.replace(/<[^>]*>/g, '').trim()) throw new Error(`shorts/${short.sourcePath}: a nonempty text body or link is required`);
+    if (!short.link && !hasImage && !html.replace(/<[^>]*>/g, '').trim()) throw new Error(`shorts/${short.sourcePath}: a nonempty text body, local image, or link is required`);
     const { draft, body, sourcePath, ...entry } = short;
     entries.push({ ...entry, html, preview: null });
   }

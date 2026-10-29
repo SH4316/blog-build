@@ -19,12 +19,12 @@ import { createHighlighter } from 'shiki';
 import { writeSiteAssets } from './site-assets.mjs';
 import { buildShorts } from './shorts.mjs';
 import { createShortPreviewResolver } from './short-previews.mjs';
+import { assetUrl, imageExtension, localPath, textSourceOffsets, wikiImage } from './local-images.mjs';
 
 const exec = promisify(execFile);
 export const projectDir = fileURLToPath(new URL('../', import.meta.url));
 export const siteUrl = 'https://blog.soohyuk.dev';
 let highlighterPromise;
-const imageExtension = /\.(?:apng|avif|bmp|gif|ico|jpe?g|png|svg|webp)$/i;
 const mathSchema = {
   ...defaultSchema,
   attributes: {
@@ -94,7 +94,8 @@ export function parsePost(raw, sourcePath) {
 
 function textOf(node) {
   if (node.type === 'text' || node.type === 'inlineCode' || node.type === 'code' || node.type === 'inlineMath' || node.type === 'math') return node.value || '';
-  if (node.type === 'image') return node.alt || '';
+  // Image alt text remains in the body, but filenames are not prose excerpts.
+  if (node.type === 'image') return '';
   return (node.children || []).map(textOf).join(node.type === 'root' ? '\n' : ' ');
 }
 
@@ -103,16 +104,6 @@ function doubleDollarDisplay() {
     const original = String(file.value).slice(node.position.start.offset, node.position.end.offset);
     if (original.startsWith('$$')) node.data.hProperties.className = ['language-math', 'math-display'];
   });
-}
-
-function localPath(value, sourcePath) {
-  const [, pathname, suffix = ''] = /^([^?#]*)([?#].*)?$/.exec(value);
-  let decoded;
-  try { decoded = decodeURIComponent(pathname); } catch { throw new Error(`${sourcePath}: invalid encoded path ${value}`); }
-  if (decoded.includes('\\') || decoded.includes('\0') || decoded.split('/').some(segment => segment.startsWith('.') && segment !== '.' && segment !== '..')) {
-    throw new Error(`${sourcePath}: local paths cannot contain hidden files, backslashes, or null characters: ${value}`);
-  }
-  return { decoded, suffix };
 }
 
 function allowedAssetPath(relative, value, sourcePath) {
@@ -126,55 +117,8 @@ function referencePath(value, sourcePath) {
   return { relative, suffix };
 }
 
-function assetUrl(relative) {
-  const rootImage = relative.startsWith('images/');
-  return `${rootImage ? '/content-images/' : '/content-assets/'}${relative.slice(rootImage ? 7 : 6).split('/').map(encodeURIComponent).join('/')}`;
-}
-
-function textSourceOffsets(original) {
-  const offsets = [];
-  for (let index = 0; index < original.length;) {
-    let raw = original[index];
-    let decoded = raw;
-    if (raw === '\\' && /[\u0021-\u002f\u003a-\u0040\u005b-\u0060\u007b-\u007e]/.test(original[index + 1] || '')) {
-      raw = original.slice(index, index + 2);
-      decoded = raw[1];
-    } else if (raw === '&') {
-      const entity = /^&(?:#(?:[xX][\da-fA-F]+|\d+)|[A-Za-z][A-Za-z\d]+);/.exec(original.slice(index));
-      if (entity) {
-        raw = entity[0];
-        decoded = textOf(unified().use(remarkParse).parse(raw));
-      }
-    }
-    offsets.push(...Array(decoded.length).fill(index));
-    index += raw.length;
-  }
-  offsets.push(original.length);
-  return offsets;
-}
-
 function wikiLinks({ post, allPosts, files, usedAssets, warnMissingArticle }) {
-  function image(value, alias) {
-    const { decoded, suffix } = localPath(value, post.sourcePath);
-    const explicit = /^\/?(?:posts|images)\//.test(decoded);
-    const relative = allowedAssetPath(path.posix.normalize(explicit ? decoded.replace(/^\//, '') : path.posix.join('posts', post.folder, decoded)), value, post.sourcePath);
-    let target = files.has(relative) ? relative : undefined;
-    if (!target && !explicit && !decoded.startsWith('.')) {
-      const matches = [...files].filter(file => imageExtension.test(file) && (file === `posts/${decoded}` || file.endsWith(`/${decoded}`)));
-      if (matches.length > 1) throw new Error(`${post.sourcePath}: ambiguous wiki image: ${value}; use a folder path`);
-      target = matches[0];
-    }
-    if (!target) throw new Error(`${post.sourcePath}: local image does not exist: ${value}`);
-    usedAssets.add(target);
-    const size = /^(\d{1,5})(?:x(\d{1,5}))?$/.exec(alias);
-    const dimensions = size && size.slice(1).filter(Boolean).every(value => Number(value) > 0)
-      ? { width: Number(size[1]), ...(size[2] ? { height: Number(size[2]) } : {}) } : {};
-    return {
-      type: 'image', url: `${assetUrl(target)}${suffix}`,
-      alt: alias && !Object.keys(dimensions).length ? alias : path.posix.basename(decoded),
-      ...(Object.keys(dimensions).length ? { data: { hProperties: dimensions } } : {}),
-    };
-  }
+  const image = (value, alias) => wikiImage(value, alias, { sourcePath: post.sourcePath, folder: post.folder, scope: 'posts', files, usedAssets });
   function resolve(value) {
     const [destination, ...headingParts] = value.split('#');
     const name = destination.trim().replace(/\.md$/i, '');
@@ -308,7 +252,10 @@ export async function buildCatalog(rootDirectory, { sample = false, revision = n
   let imageFiles = [];
   try { await lstat(imagesDirectory); imageFiles = await walk(imagesDirectory); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
-  const files = new Set([...fileList.map(file => `posts/${file}`), ...imageFiles.filter(file => imageExtension.test(file)).map(file => `images/${file}`)]);
+  let shortFiles = [];
+  try { await lstat(path.join(rootDirectory, 'shorts')); shortFiles = await walk(path.join(rootDirectory, 'shorts')); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const files = new Set([...fileList.map(file => `posts/${file}`), ...imageFiles.filter(file => imageExtension.test(file)).map(file => `images/${file}`), ...shortFiles.filter(file => imageExtension.test(file)).map(file => `shorts/${file}`)]);
   const allPosts = await Promise.all(fileList.filter(file => file.toLowerCase().endsWith('.md')).map(async source => parsePost(await readFile(path.join(postsDirectory, source), 'utf8'), source)));
   const slugs = new Set();
   for (const post of allPosts) {
@@ -352,7 +299,7 @@ export async function buildCatalog(rootDirectory, { sample = false, revision = n
     while (folder) { folders.add(folder); folder = path.posix.dirname(folder); if (folder === '.') break; }
   }
   const summaries = published.map(post => { const { html, toc, ...summary } = articles[post.slug]; return summary; });
-  const shorts = await buildShorts(rootDirectory, { previewResolver });
+  const shorts = await buildShorts(rootDirectory, { previewResolver, files, usedAssets });
   const usedPreviews = new Set(shorts.map(short => short.preview?.image?.slice('/short-previews/'.length)).filter(Boolean));
   return {
     catalog: { posts: summaries, folders: [...folders].sort((a, b) => a.localeCompare(b, 'ko')), tags: [...new Set(summaries.flatMap(post => post.tags))].sort((a, b) => a.localeCompare(b, 'ko')), sample, revision },
@@ -397,10 +344,12 @@ export async function writeContent(result, directory = projectDir) {
   const assets = path.join(publicDirectory, 'content-assets');
   const images = path.join(publicDirectory, 'content-images');
   const previews = path.join(publicDirectory, 'short-previews');
+  const shortAssets = path.join(publicDirectory, 'short-assets');
   await mkdir(generated, { recursive: true });
   await rm(assets, { recursive: true, force: true });
   await rm(images, { recursive: true, force: true });
   await rm(previews, { recursive: true, force: true });
+  await rm(shortAssets, { recursive: true, force: true });
   await mkdir(assets, { recursive: true });
   await Promise.all([
     writeFile(path.join(generated, 'catalog.json'), JSON.stringify(result.catalog)),

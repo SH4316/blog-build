@@ -19,6 +19,7 @@ assert.equal((index.match(/rel="canonical"/g) || []).length, 1);
 assert.ok(index.includes(`href="${siteUrl}"`));
 assert.equal(search.length, catalog.posts.length);
 const shortsHtml = await read('shorts.html');
+const shortImagePaths = new Set();
 assert.ok(shortsHtml.includes(`href="${siteUrl}/shorts"`), 'Short feed canonical URL');
 assert.equal((shortsHtml.match(/rel="canonical"/g) || []).length, 1);
 assert.ok(sitemap.includes(`<loc>${siteUrl}/shorts</loc>`));
@@ -29,6 +30,15 @@ for (const short of shorts) {
   assert.ok(shortsHtml.includes(short.html), `${short.id}: full content is present without JavaScript`);
   await assert.rejects(access(path.join(output, 'shorts', `${short.id}.html`)), { code: 'ENOENT' });
   assert.ok(!JSON.stringify(search).includes(short.id), 'Short entries stay outside article search');
+  for (const [, source] of short.html.matchAll(/<img\b[^>]*\bsrc="([^"]+)"/g)) {
+    const url = new URL(source, siteUrl);
+    assert.equal(url.origin, siteUrl, `${short.id}: body images must be local`);
+    assert.match(url.pathname, /^\/(?:content-images|content-assets|short-assets)\//);
+    const imagePath = decodeURIComponent(url.pathname).replace(/^\//, '');
+    assert.ok(!imagePath.split('/').includes('..') && !imagePath.includes('\\'), `${short.id}: invalid local image URL: ${source}`);
+    await access(path.join(output, imagePath)).catch(error => { throw new Error(`${short.id}: built image is missing: ${source}`, { cause: error }); });
+    if (imagePath.startsWith('short-assets/')) shortImagePaths.add(imagePath.slice('short-assets/'.length));
+  }
   if (short.preview?.image) {
     assert.match(short.preview.image, /^\/short-previews\/[a-f0-9]{64}\.webp$/);
     assert.ok(shortsHtml.includes(short.preview.image), `${short.id}: preview image is in initial HTML`);
@@ -39,6 +49,18 @@ let previewFiles = [];
 try { previewFiles = await readdir(path.join(output, 'short-previews')); }
 catch (error) { if (error.code !== 'ENOENT') throw error; }
 assert.deepEqual(previewFiles.sort(), [...new Set(shorts.map(short => short.preview?.image?.split('/').at(-1)).filter(Boolean))].sort(), 'Preview assets must exactly match published references');
+async function assetFiles(directory, prefix = '') {
+  let entries;
+  try { entries = await readdir(directory, { withFileTypes: true }); }
+  catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+  const files = [];
+  for (const entry of entries) {
+    if (entry.isDirectory()) files.push(...await assetFiles(path.join(directory, entry.name), `${prefix}${entry.name}/`));
+    else files.push(`${prefix}${entry.name}`);
+  }
+  return files;
+}
+assert.deepEqual((await assetFiles(path.join(output, 'short-assets'))).sort(), [...shortImagePaths].sort(), 'Short image assets must exactly match published references');
 for (const post of catalog.posts) {
   const html = await read(`posts/${post.slug}.html`);
   assert.ok(html.includes(articles[post.slug].html), `${post.slug}: article HTML is present without JavaScript`);

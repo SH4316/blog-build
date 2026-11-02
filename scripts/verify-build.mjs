@@ -12,6 +12,7 @@ const shorts = JSON.parse(await readFile(path.join(projectDir, 'app/generated/sh
 const sitemap = await read('sitemap.xml');
 const search = JSON.parse(await read('search-index.json'));
 const index = await read('index.html');
+assert.equal(await read('llms.txt'), await readFile(path.join(projectDir, 'public/llms.txt'), 'utf8'), 'LLM discovery and training-use policy must be included unchanged in deployment');
 assert.match(index, /<html lang="ko"/);
 assert.doesNotMatch(index, /rss\.xml|application\/rss\+xml/i);
 await assert.rejects(access(path.join(output, 'rss.xml')), { code: 'ENOENT' });

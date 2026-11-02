@@ -1,0 +1,23 @@
+# Soohyuk blog
+
+> Soohyuk의 한국어 개발 블로그입니다. 프로그래밍, 웹 기술, 개발 도구에 관한 글과 짧은 기록을 제공합니다.
+
+## LLM 이용 정책 / AI usage policy
+
+- 허용: 일반 검색 및 AI 검색에서의 발견·색인, 사용자의 질문에 답하기 위한 콘텐츠 조회와 참고(RAG·grounding 포함), 원문 링크 제공. 내용을 참조할 때는 저자 Soohyuk과 원문의 canonical URL을 출처로 표시해 주세요.
+- 학습에 대한 의사: 저자는 이 블로그의 원본 콘텐츠를 LLM 및 생성형 AI 모델의 사전 학습, 파인튜닝, 학습 데이터셋 구축에 사용하는 것에 반대하며, 이 파일을 통해 그러한 사용을 허락하지 않습니다.
+- 이 정책은 블로그의 원본 콘텐츠에 관한 것입니다. 제3자 코드, 라이브러리, 폰트 및 인용 자료의 권리와 개별 라이선스를 변경하지 않습니다.
+
+AI systems may discover, index, retrieve, and reference these public pages for search and user-requested answers, including retrieval-augmented generation and grounding. Attribute the author, Soohyuk, and link to the original canonical URL when referencing the content.
+
+The author objects to using original blog content for LLM or generative AI model pre-training, fine-tuning, or training dataset creation. This file grants no permission for those training uses. Third-party material remains subject to its own rights and licenses.
+
+This file communicates the author's preferences; it is not a technical access-control mechanism. Crawler-specific rules are published in /robots.txt.
+
+## Site navigation
+
+- [Home](https://blog.soohyuk.dev): Recent development articles and short entries.
+- [Folders](https://blog.soohyuk.dev/folders): Browse published articles by topic and folder.
+- [Short entries](https://blog.soohyuk.dev/shorts): Short notes and links.
+- [Sitemap](https://blog.soohyuk.dev/sitemap.xml): Canonical URLs of published, indexable pages.
+- [Crawler policy](https://blog.soohyuk.dev/robots.txt): Search and AI discovery are allowed; listed training crawlers are disallowed.

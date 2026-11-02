@@ -131,6 +131,18 @@ Pages 프로젝트의 **Custom domains → Set up a custom domain**에서 `blog.
 
 메타데이터, canonical, OG, BlogPosting 구조화 데이터와 글·코드·수식은 초기 HTML에 포함됩니다. 검색과 404는 `noindex`, 코드 저장소의 비운영 브랜치 빌드는 `X-Robots-Tag: noindex, nofollow`로 표시합니다. CSS·JS·KaTeX·IBM Plex Sans·Noto Sans KR 폰트와 참조 이미지는 로컬 정적 파일로 제공합니다.
 
+### 검색·LLM 조회 허용과 AI 학습 거부
+
+`scripts/site-assets.mjs`가 개발·배포 빌드마다 `/robots.txt`를 생성합니다. 일반 검색 수집은 `User-agent: *`의 `Allow: /`로 허용하고 사이트맵 주소를 제공합니다. 기존 canonical·구조화 데이터·사이트맵과 검색/404의 `noindex` 정책도 유지합니다. 이 설정은 검색 수집을 허용하며 검색 순위 상승을 보장하지는 않습니다.
+
+`GPTBot`, `ClaudeBot`, `Google-Extended`, `Applebot-Extended`, `CCBot`, `Bytespider`, `meta-externalagent`에는 각각 `Disallow: /`를 적용해 AI 학습 수집 거부 의사를 표시합니다. Googlebot·Bingbot·네이버 Yeti 같은 일반 검색 크롤러는 허용하며, AI 검색 전용 `OAI-SearchBot`·`Claude-SearchBot`과 사용자 요청 조회용 `ChatGPT-User`·`Claude-User`에는 `Allow: /`를 명시합니다. OpenAI와 Anthropic은 학습·검색 크롤러를 구분합니다. Google-Extended는 Gemini 학습과 일부 grounding 사용을 함께 제어하며 Google 검색 노출·순위에는 영향을 주지 않습니다. 따라서 이 설정은 Google 검색 노출을 유지하지만 Google-Extended로 제어되는 Gemini grounding까지 모두 허용하는 것은 아닙니다. Applebot-Extended도 Apple 검색 크롤링과 별도로 학습 사용을 제어합니다.
+
+`public/llms.txt`는 배포 시 `/llms.txt`로 복사합니다. LLM의 검색·답변을 위한 조회·참고와 출처 인용은 허용하고, 원본 글을 사전 학습·파인튜닝·학습 데이터셋 구축에 사용하는 것에는 반대하며 사용을 허락하지 않는다는 의사를 한국어·영어로 명시했습니다. 홈·폴더·짧은 글·사이트맵으로도 안내합니다. 이 정책은 제3자 코드·폰트 등의 개별 라이선스를 변경하지 않습니다.
+
+`llms.txt`는 LLM에 콘텐츠와 이용 의사를 안내하는 제안 형식이며 학습 금지를 집행하는 파일은 아닙니다. `robots.txt`도 협조적인 수집자에게 적용되는 요청이며, 이미 수집된 데이터의 삭제나 모든 수집자의 준수를 보장하지 않습니다. 실제 접속 차단이 필요하면 Cloudflare AI Crawl Control 등 호스팅 계층에서 별도로 설정해야 합니다. 알려진 크롤러 목록은 서비스 문서 변경에 맞춰 갱신합니다. `npm run verify:build`는 배포물의 `llms.txt`가 원본과 일치하는지 검사합니다.
+
+공식 참고: [OpenAI 크롤러](https://developers.openai.com/api/docs/bots), [Anthropic 크롤러](https://privacy.claude.com/en/articles/8896518-does-anthropic-crawl-data-from-the-web-and-how-can-site-owners-block-the-crawler), [Google-Extended](https://developers.google.com/crawling/docs/crawlers-fetchers/google-common-crawlers#google-extended), [Applebot](https://support.apple.com/en-us/119829), [Common Crawl](https://commoncrawl.org/ccbot), [Cloudflare AI 크롤러 규칙](https://developers.cloudflare.com/bots/additional-configurations/managed-robots-txt/), [llms.txt 제안](https://llmstxt.org/).
+
 ## 배포 확인
 
 - 글 추가·수정·삭제 후 Pages 배포 결과와 도메인에서의 반영을 확인합니다.

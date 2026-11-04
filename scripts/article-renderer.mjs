@@ -12,6 +12,7 @@ import { SKIP, visit } from 'unist-util-visit';
 import { createHighlighter } from 'shiki';
 import { assetUrl, imageExtension, localPath, wikiImage } from './local-images.mjs';
 import { markdownWiki } from './markdown-wiki.mjs';
+import { youtubeEmbeds } from './youtube-embeds.mjs';
 
 let highlighterPromise;
 const mathSchema = {
@@ -173,7 +174,7 @@ export async function renderArticle(post, context) {
     .use(wikiLinks({ post, ...context }))
     .use(() => tree => { plainText = textOf(tree).replace(/\s+/g, ' ').trim(); })
     .use(remarkRehype).use(rewriteReferences({ post, ...context }))
-    .use(rehypeSanitize, mathSchema).use(rehypeSlug)
+    .use(rehypeSanitize, mathSchema).use(youtubeEmbeds).use(rehypeSlug)
     .use(enhanceContent(toc, shiki)).use(rehypeKatex, { trust: false, strict: 'error', output: 'htmlAndMathml' })
     .use(rehypeStringify).process(post.body);
   if (result.messages.length) throw new Error(`${post.sourcePath}: ${result.messages.map(message => message.reason).join('; ')}`);

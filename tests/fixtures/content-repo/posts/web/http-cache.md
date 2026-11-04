@@ -91,3 +91,7 @@ HTML처럼 주소는 유지하면서 내용이 바뀌는 파일은 별도의 정
 > 캐시 정책은 파일의 이름과 업데이트 방식을 함께 생각할 때 더 명확해집니다.
 
 코드에서 상태를 구분하는 방법은 [TypeScript의 판별 유니온](../react/typescript/discriminated-unions.md)에도 정리해 두었습니다.
+
+## 참고 영상
+
+![YouTube 플레이어 예제](https://youtu.be/M7lc1UVf-VE?t=30)

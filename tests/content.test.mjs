@@ -494,3 +494,75 @@ test('author descriptions and ordinary prose or inline-code filenames are preser
     assert.doesNotMatch(text, /hidden-image-label.png/);
   }
 });
+
+test('YouTube image embeds render validated players for supported video URLs', async t => {
+  const urls = [
+    'https://www.youtube.com/watch?v=M7lc1UVf-VE&si=tracking',
+    'https://youtube.com/watch?v=M7lc1UVf-VE',
+    'https://m.youtube.com/watch?v=M7lc1UVf-VE',
+    'https://music.youtube.com/watch?v=M7lc1UVf-VE',
+    'https://youtu.be/M7lc1UVf-VE',
+    'https://www.youtube.com/shorts/M7lc1UVf-VE',
+    'https://www.youtube.com/live/M7lc1UVf-VE',
+    'https://www.youtube.com/embed/M7lc1UVf-VE',
+    'https://www.youtube-nocookie.com/embed/M7lc1UVf-VE',
+  ];
+  const root = await fixture(t, { 'video.md': article('video', urls.map(url => `![](${url})`).join('\n\n')) });
+  const { articles, usedAssets } = await buildCatalog(root);
+  const html = articles.video.html;
+  assert.equal((html.match(/<iframe /g) || []).length, urls.length);
+  assert.equal((html.match(/src="https:\/\/www.youtube-nocookie.com\/embed\/M7lc1UVf-VE"/g) || []).length, urls.length);
+  assert.match(html, /title="YouTube 동영상"/);
+  assert.match(html, /loading="lazy"/);
+  assert.match(html, /allowfullscreen/);
+  assert.match(html, /referrerpolicy="strict-origin-when-cross-origin"/);
+  assert.doesNotMatch(html, /<img|tracking/);
+  assert.deepEqual(usedAssets, []);
+});
+
+test('YouTube embeds preserve titles, reference syntax, inline prose and safe start times', async t => {
+  const root = await fixture(t, { 'video.md': article('video', [
+    '앞 ![영상 설명](https://youtu.be/M7lc1UVf-VE?t=1h2m3s&autoplay=1) 뒤',
+    '![참조 영상][video]',
+    '[video]: https://www.youtube.com/watch?v=M7lc1UVf-VE&start=90 "제목"',
+    '![](https://youtu.be/M7lc1UVf-VE#t=30s)',
+    '![](https://youtu.be/M7lc1UVf-VE?t=invalid)',
+    '![](https://youtu.be/M7lc1UVf-VE?t=99999999999999999999)',
+    '![](https://youtu.be/M7lc1UVf-VE "영상 제목")',
+    '`![](https://youtu.be/M7lc1UVf-VE)`',
+  ].join('\n\n')) });
+  const { articles } = await buildCatalog(root);
+  const html = articles.video.html;
+  assert.match(html, /start=3723" title="영상 설명"/);
+  assert.match(html, /start=90" title="참조 영상"/);
+  assert.match(html, /start=30"/);
+  assert.match(html, /title="영상 제목"/);
+  assert.equal((html.match(/<iframe /g) || []).length, 6);
+  assert.match(html, /<p>앞 <iframe[\s\S]*?<\/iframe> 뒤<\/p>/);
+  assert.match(html, /<code>!\[\]\(https:\/\/youtu.be\/M7lc1UVf-VE\)<\/code>/);
+  assert.doesNotMatch(html, /autoplay=1|start=invalid|start=999999/);
+});
+
+test('untrusted hosts, invalid video paths, raw HTML and ordinary images never create players', async t => {
+  const urls = [
+    'https://youtube.com.evil.test/watch?v=M7lc1UVf-VE',
+    'https://evil.test/youtu.be/M7lc1UVf-VE',
+    'https://youtube.com@evil.test/watch?v=M7lc1UVf-VE',
+    'https://user:pass@youtube.com/watch?v=M7lc1UVf-VE',
+    'https://www.youtube.com:444/watch?v=M7lc1UVf-VE',
+    'https://www.youtube.com/watch?v=invalid',
+    'https://www.youtube.com/playlist?list=M7lc1UVf-VE',
+    'https://youtu.be/M7lc1UVf-VE/extra',
+    'https://example.com/image.png',
+  ];
+  const root = await fixture(t, { 'video.md': article('video', [
+    ...urls.map(url => `![](${url})`),
+    '<iframe src="https://www.youtube.com/embed/M7lc1UVf-VE" onload="alert(1)"></iframe>',
+    '<script>alert(1)</script>',
+    '[일반 링크](https://youtu.be/M7lc1UVf-VE)',
+  ].join('\n\n')) });
+  const { articles } = await buildCatalog(root);
+  assert.doesNotMatch(articles.video.html, /<iframe|<script|onload=/);
+  assert.equal((articles.video.html.match(/<img /g) || []).length, urls.length);
+  assert.match(articles.video.html, /<a href="https:\/\/youtu.be\/M7lc1UVf-VE">일반 링크<\/a>/);
+});

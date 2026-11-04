@@ -246,3 +246,27 @@ test('sidebar collapses on article navigation and can be reopened', async ({ pag
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test('YouTube image embeds ship in static HTML and fit the reading column', async ({ page, request }, testInfo) => {
+  // Keep the layout check deterministic; YouTube playback itself is external.
+  await page.route('https://www.youtube-nocookie.com/embed/**', route => route.fulfill({
+    contentType: 'text/html', body: '<html><body style="margin:0;background:#111;color:white">YouTube player fixture</body></html>',
+  }));
+  await page.goto('/posts/http-cache');
+  const player = page.locator('article iframe');
+  await player.scrollIntoViewIfNeeded();
+  await expect(player).toBeVisible();
+  await expect(player).toHaveAttribute('src', 'https://www.youtube-nocookie.com/embed/M7lc1UVf-VE?start=30');
+  await expect(player).toHaveAttribute('title', 'YouTube 플레이어 예제');
+  await expect(player).toHaveAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+  const bounds = await player.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(bounds!.width / bounds!.height).toBeCloseTo(16 / 9, 1);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(testInfo.project.use.viewport!.width);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await player.focus();
+  await expect(player).toBeFocused();
+  await page.screenshot({ path: `test-results/${testInfo.project.name}-youtube.png` });
+  const response = await request.get('/posts/http-cache');
+  expect(await response.text()).toContain('<iframe src="https://www.youtube-nocookie.com/embed/M7lc1UVf-VE?start=30"');
+});

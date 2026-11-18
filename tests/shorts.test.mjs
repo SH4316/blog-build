@@ -96,6 +96,85 @@ test('short Markdown renders safe prose and links without fetching previews or i
   assert.equal(entry.preview, null);
 });
 
+test('short YouTube image embeds render players, including video-only bodies', async t => {
+  const urls = [
+    'https://www.youtube.com/watch?v=M7lc1UVf-VE&si=tracking',
+    'https://youtube.com/watch?v=M7lc1UVf-VE',
+    'https://m.youtube.com/watch?v=M7lc1UVf-VE',
+    'https://music.youtube.com/watch?v=M7lc1UVf-VE',
+    'https://youtu.be/M7lc1UVf-VE',
+    'https://www.youtube.com/shorts/M7lc1UVf-VE',
+    'https://www.youtube.com/live/M7lc1UVf-VE',
+    'https://www.youtube.com/embed/M7lc1UVf-VE',
+    'https://www.youtube-nocookie.com/embed/M7lc1UVf-VE',
+  ];
+  const root = await fixture(t, Object.fromEntries(urls.map((url, index) => [`video-${index}.md`, note(`![](${url})`)])));
+  const usedAssets = new Set();
+  const entries = await buildShorts(root, { usedAssets });
+  assert.equal(entries.length, urls.length);
+  for (const entry of entries) {
+    assert.match(entry.html, /<iframe src="https:\/\/www.youtube-nocookie.com\/embed\/M7lc1UVf-VE"/);
+    assert.match(entry.html, /title="YouTube 동영상"/);
+    assert.match(entry.html, /loading="lazy"/);
+    assert.match(entry.html, /allowfullscreen/);
+    assert.match(entry.html, /referrerpolicy="strict-origin-when-cross-origin"/);
+    assert.doesNotMatch(entry.html, /<img|tracking/);
+  }
+  assert.deepEqual([...usedAssets], []);
+});
+
+test('short YouTube embeds preserve references, labels and start times while examples and ordinary links stay literal', async t => {
+  const root = await fixture(t, { 'video.md': note([
+    '앞 ![영상 설명](https://youtu.be/M7lc1UVf-VE?t=1m30s&autoplay=1) 뒤',
+    '![참조 영상][video]',
+    '[video]: https://www.youtube.com/watch?v=M7lc1UVf-VE&start=30 "제목"',
+    '`![](https://youtu.be/M7lc1UVf-VE)`',
+    '```markdown\n![](https://youtu.be/M7lc1UVf-VE)\n```',
+    '\\![](https://youtu.be/M7lc1UVf-VE)',
+    '[일반 링크](https://youtu.be/M7lc1UVf-VE)',
+  ].join('\n\n')) });
+  const [entry] = await buildShorts(root);
+  assert.equal((entry.html.match(/<iframe /g) || []).length, 2);
+  assert.match(entry.html, /start=90" title="영상 설명"/);
+  assert.match(entry.html, /start=30" title="참조 영상"/);
+  assert.match(entry.html, /<p>앞 <iframe[\s\S]*?<\/iframe> 뒤<\/p>/);
+  assert.match(entry.html, /<code>!\[\]\(https:\/\/youtu.be\/M7lc1UVf-VE\)<\/code>/);
+  assert.match(entry.html, /href="https:\/\/youtu.be\/M7lc1UVf-VE">일반 링크<\/a>/);
+  assert.doesNotMatch(entry.html, /autoplay=1/);
+});
+
+test('short video support keeps raw iframes and other remote images disabled and retains local images', async t => {
+  const urls = [
+    'https://youtube.com.evil.test/watch?v=M7lc1UVf-VE',
+    'https://youtube.com@evil.test/watch?v=M7lc1UVf-VE',
+    'https://user:pass@youtube.com/watch?v=M7lc1UVf-VE',
+    'https://www.youtube.com:444/watch?v=M7lc1UVf-VE',
+    'https://www.youtube.com/watch?v=invalid',
+    'https://www.youtube.com/playlist?list=M7lc1UVf-VE',
+    'https://youtu.be/M7lc1UVf-VE/extra',
+    'https://example.com/tracker.png',
+    '//www.youtube.com/watch?v=M7lc1UVf-VE',
+    'data:image/png;base64,AAAA',
+  ];
+  const root = await fixture(t, {
+    'video.md': note([
+      ...urls.map(url => `![](${url})`),
+      '<iframe src="https://www.youtube.com/embed/M7lc1UVf-VE" onload="alert(1)"></iframe>',
+      '<script>alert(1)</script>',
+      '![로컬 그림](local.png)',
+    ].join('\n\n')),
+    'local.png': 'local image bytes',
+  });
+  const usedAssets = new Set();
+  const [entry] = await buildShorts(root, { usedAssets });
+  assert.doesNotMatch(entry.html, /<iframe|<script|onload=|tracker|evil\.test/);
+  assert.equal((entry.html.match(/<img /g) || []).length, 1);
+  assert.match(entry.html, /src="\/short-assets\/local.png" alt="로컬 그림"/);
+  assert.deepEqual([...usedAssets], ['shorts/local.png']);
+  await writeFile(path.join(root, 'shorts/video.md'), note('![](https://www.youtube.com/watch?v=invalid)'));
+  await assert.rejects(buildShorts(root), /nonempty text body/);
+});
+
 test('entries sort by instant descending with stable filename ties and exclude drafts', async t => {
   const root = await fixture(t, {
     'z.md': note('같은 시각 Z', '', '2026-10-28T08:00:00Z'),
@@ -137,7 +216,7 @@ test('a missing shorts folder is compatible with existing content; symlinks fail
 
 test('sanitized empty prose needs a link, while link-only entries are supported', async t => {
   const empty = await fixture(t, { 'empty.md': note('<script>alert(1)</script>') });
-  await assert.rejects(buildShorts(empty), /nonempty text body, local image, or link/);
+  await assert.rejects(buildShorts(empty), /nonempty text body, local image, YouTube video, or link/);
   const linkOnly = await fixture(t, { 'link.md': note('', 'link: "https://example.com"') });
   const [entry] = await buildShorts(linkOnly);
   assert.equal(entry.html, '');

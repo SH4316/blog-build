@@ -99,8 +99,9 @@
 .body > :last-child { margin-bottom: 0; }
 .body p { margin: 0 0 12px; }
 .body img { display: block; max-width: 100%; max-height: 360px; height: auto; object-fit: contain; margin: 12px 0; border: 1px solid var(--border); border-radius: 8px; }
-.body > :first-child > img:first-child { margin-top: 0; }
-.body > :last-child > img:last-child { margin-bottom: 0; }
+.body iframe { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; margin: 12px 0; border: 0; border-radius: 8px; }
+.body > :first-child > :is(img, iframe):first-child { margin-top: 0; }
+.body > :last-child > :is(img, iframe):last-child { margin-bottom: 0; }
 .body a { color: var(--accent); text-decoration: underline; }
 .body a + a { margin-inline-start: .35em; }
 .body strong { font-weight: 600; }

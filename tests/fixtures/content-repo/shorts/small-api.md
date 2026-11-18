@@ -9,3 +9,5 @@ API를 작게 유지하는 가장 좋은 기준은 **호출하는 코드가 자�
 함께 읽기: [캐시](/posts/http-cache)[수식](/posts/gradient-descent)
 
 ![[posts/web/images/cache-flow.svg|HTTP 캐시 흐름도]]
+
+![짧은 글 YouTube 플레이어](https://youtu.be/M7lc1UVf-VE?t=30s)

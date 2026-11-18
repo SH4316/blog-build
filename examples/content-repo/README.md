@@ -80,6 +80,8 @@ draft: false
 - `draft: true`인 짧은 글은 공개하지 않습니다. 파일명에서 `/shorts#...` 앵커를 생성하므로 게시 후 파일을 이동하거나 이름을 바꾸면 해당 앵커도 달라집니다.
 - `shorts/`가 없어도 기존 콘텐츠는 정상 빌드되며 빈 화면을 표시합니다. 이 템플릿의 `shorts/hello.md`는 샘플이므로 실제 게시 전에 교체하거나 삭제하세요.
 
+짧은 글 본문에 `![](https://www.youtube.com/watch?v=M7lc1UVf-VE)` 또는 `![영상 설명](https://youtu.be/M7lc1UVf-VE?t=1m30s)`를 쓰면 YouTube 플레이어로 표시합니다. 영상만 있는 본문도 게시할 수 있으며, 홈 미리보기와 `/shorts`에서 화면 폭에 맞춰 16:9로 표시합니다. 시작 시각은 유지하고 자동 재생·추적 매개변수는 제거합니다. 일반 링크와 frontmatter의 `link`는 기존 링크·미리보기로 표시합니다.
+
 짧은 글 이미지는 `shorts/` 내부, `posts/` 내부 또는 저장소 루트의 `images/`에 보관합니다. 예를 들어 `shorts/notes/today.md`에서는 다음처럼 참조합니다.
 
 ```markdown

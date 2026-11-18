@@ -23,6 +23,8 @@ The `/shorts` page is a chronological reading feed, reached through “짧은 �
 
 Short-post body images preserve their full aspect ratio and fit within the text column, with a maximum height of 360px on desktop and 280px below 900px. Home previews keep their smaller 260px limit, reduced to 220px below 560px. Use contain sizing, the existing fine border and 8px corners, respect authored width hints within the available space, and avoid cropping screenshots or diagrams. Local Markdown images and Obsidian image embeds are included in the static build, including posts whose body consists only of an image.
 
+YouTube image embeds in short-post bodies use the article renderer’s validated player URLs. Players fit the body column at 16:9 with 8px corners in both the full feed and home preview, including video-only posts.
+
 The Obsidian “새 짧은 글” modal uses the host app’s theme, typography and standard controls. Stack a multiline body, optional URL and optional title at full width so the form remains usable on mobile. Describe the current draft setting before the create action, retain entered values after validation errors, and allow Ctrl/Command+Enter to submit without intercepting normal line breaks or IME input.
 
 ## Interaction

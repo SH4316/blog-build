@@ -11,6 +11,7 @@ import { SKIP, visit } from 'unist-util-visit';
 import { assetSourcePath, imageExtension, shortImagePath, wikiImage } from './local-images.mjs';
 import { markdownWiki } from './markdown-wiki.mjs';
 import { collectContentFiles, walk } from './content-inventory.mjs';
+import { youtubeEmbeds } from './youtube-embeds.mjs';
 
 const shortSchema = {
   ...defaultSchema,
@@ -115,14 +116,16 @@ export async function buildShorts(rootDirectory, { previewResolver = null, files
   parsed.sort((a, b) => timestamp(b.date) - timestamp(a.date) || (a.sourcePath < b.sourcePath ? -1 : a.sourcePath > b.sourcePath ? 1 : 0));
   const entries = [];
   for (const short of parsed.filter(entry => !entry.draft)) {
-    let hasImage = false;
+    let hasMedia = false;
     const result = await unified().use(remarkParse).use(remarkGfm).use(shortWikiImages(short, imageFiles, usedAssets)).use(remarkRehype)
-      .use(shortLocalImages(short, imageFiles, usedAssets)).use(rehypeSanitize, shortSchema).use(safeShortLinks)
+      // Convert validated video URLs before removing other remote images.
+      .use(rehypeSanitize, shortSchema).use(youtubeEmbeds).use(shortLocalImages(short, imageFiles, usedAssets)).use(safeShortLinks)
       .use(() => tree => visit(tree, 'element', node => {
-        if (node.tagName === 'img') { hasImage = true; node.properties.loading = 'lazy'; node.properties.decoding = 'async'; }
+        if (node.tagName === 'img' || node.tagName === 'iframe') hasMedia = true;
+        if (node.tagName === 'img') { node.properties.loading = 'lazy'; node.properties.decoding = 'async'; }
       })).use(rehypeStringify).process(short.body);
     const html = String(result);
-    if (!short.link && !hasImage && !html.replace(/<[^>]*>/g, '').trim()) throw new Error(`shorts/${short.sourcePath}: a nonempty text body, local image, or link is required`);
+    if (!short.link && !hasMedia && !html.replace(/<[^>]*>/g, '').trim()) throw new Error(`shorts/${short.sourcePath}: a nonempty text body, local image, YouTube video, or link is required`);
     const { draft, body, sourcePath, ...entry } = short;
     entries.push({ ...entry, html, preview: null });
   }

@@ -1,5 +1,12 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type BrowserContext } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+
+const playerUrl = 'https://www.youtube-nocookie.com/embed/M7lc1UVf-VE?start=30';
+const mockYouTube = (context: BrowserContext) => context.route('https://www.youtube-nocookie.com/embed/**', route => route.fulfill({
+  contentType: 'text/html',
+  body: '<html lang="en"><head><title>YouTube player fixture</title><style>body{margin:0;display:grid;place-items:center;height:100vh;background:#111;color:#fff;font:16px sans-serif}h1{margin:0;font:inherit}</style></head><body><main aria-label="YouTube player fixture"><h1>YouTube player fixture</h1></main></body></html>',
+}));
+test.beforeEach(async ({ context }) => { await mockYouTube(context); });
 
 test('short feed renders full entries in chronological order with fragment and external links', async ({ page, request }) => {
   const errors: string[] = [];
@@ -154,6 +161,37 @@ test('short body images load from local static assets and remain in prerendered 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
+test('short YouTube embeds fit the full feed and home preview and ship in static HTML', async ({ page, request }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  for (const pathname of ['/shorts', '/']) {
+    await page.goto(pathname);
+    if (pathname === '/') {
+      const disclosure = page.locator('section[aria-labelledby="home-shorts-heading"] details');
+      await expect(disclosure).not.toHaveAttribute('open');
+      await disclosure.locator('summary').click();
+    }
+    const player = page.getByTitle('짧은 글 YouTube 플레이어', { exact: true });
+    await player.scrollIntoViewIfNeeded();
+    await expect(player).toBeVisible();
+    await expect(player).toHaveAttribute('src', playerUrl);
+    await expect(player).toHaveAttribute('loading', 'lazy');
+    await expect(player).toHaveAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+    await expect(player).toHaveAttribute('allowfullscreen', '');
+    await expect(player.contentFrame().getByRole('heading', { name: 'YouTube player fixture' })).toBeVisible();
+    const bounds = await player.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.width / bounds!.height).toBeCloseTo(16 / 9, 1);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await player.focus();
+    await expect(player).toBeFocused();
+    expect(await (await request.get(pathname)).text()).toContain(`<iframe src="${playerUrl}" title="짧은 글 YouTube 플레이어"`);
+    await page.screenshot({ path: `test-results/${testInfo.project.name}-${pathname === '/' ? 'home' : 'shorts'}-youtube.png` });
+  }
+  expect(errors).toEqual([]);
+});
+
 test('build-time previews show local images, metadata fallbacks, and recover from a failed image', async ({ page, request }) => {
   const externalRequests: string[] = [];
   page.on('request', event => { if (new URL(event.url()).hostname !== '127.0.0.1') externalRequests.push(event.url()); });
@@ -174,7 +212,7 @@ test('build-time previews show local images, metadata fallbacks, and recover fro
   const staticHtml = await (await request.get('/shorts')).text();
   expect(staticHtml).toContain('브라우저의 화면 전환을 자연스럽게 연결하는 API');
   expect(staticHtml).toContain('/short-previews/');
-  expect(externalRequests).toEqual([]);
+  expect(externalRequests.filter(url => url !== playerUrl)).toEqual([]);
   await page.route('**/short-previews/*.webp', route => route.fulfill({ status: 404, body: '' }));
   await page.reload();
   await page.getByRole('link', { name: /View Transition API · MDN/ }).scrollIntoViewIfNeeded();
@@ -184,11 +222,13 @@ test('build-time previews show local images, metadata fallbacks, and recover fro
 
 test('short feed is readable without JavaScript and remains accessible in both themes', async ({ browser, page }, testInfo) => {
   const context = await browser.newContext({ javaScriptEnabled: false, viewport: testInfo.project.use.viewport });
+  await mockYouTube(context);
   const staticPage = await context.newPage();
   await staticPage.goto('http://127.0.0.1:4173/shorts');
   await expect(staticPage.getByRole('list', { name: '짧은 글 목록' }).locator('article')).toHaveCount(5);
   await expect(staticPage.getByRole('link', { name: /View Transition API/ })).toHaveAttribute('href', /developer.mozilla.org/);
   await expect(staticPage.getByRole('link', { name: '타입에 남겨둔 기록' })).toHaveAttribute('href', '/posts/typescript-discriminated-unions');
+  await expect(staticPage.getByTitle('짧은 글 YouTube 플레이어', { exact: true })).toBeVisible();
   expect(await staticPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await staticPage.goto('http://127.0.0.1:4173/');
   const section = staticPage.locator('section[aria-labelledby="home-shorts-heading"]');

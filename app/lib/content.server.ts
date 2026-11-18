@@ -18,6 +18,8 @@ export function getArticle(slug: string) {
 }
 
 export function getFolder(folder: string) {
+  // Splat params retain trailing slashes from prerender and direct requests.
+  folder = folder.replace(/\/+$/, '');
   const catalog = getCatalog();
   if (folder && !catalog.folders.includes(folder))
     throw new Response('Folder not found', { status: 404 });
